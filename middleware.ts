@@ -9,6 +9,43 @@ import {
 const PUBLIC_PATHS = ["/", "/sign-in", "/api/auth/session"];
 const SESSION_COOKIES = ["__session", "session", "firebaseToken"];
 
+function parseBooleanFlag(value: string | undefined | null): boolean {
+  if (!value) {
+    return false;
+  }
+
+  switch (value.toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function getDevBypassConfig() {
+  const flag =
+    parseBooleanFlag(process.env.DEV_AUTH_BYPASS) ||
+    parseBooleanFlag(process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS);
+
+  if (process.env.NODE_ENV === "production" || !flag) {
+    return { enabled: false as const };
+  }
+
+  const uid = process.env.DEV_AUTH_BYPASS_UID ?? "dev-bypass-user";
+  const email = process.env.DEV_AUTH_BYPASS_EMAIL ?? "dev-bypass@example.com";
+  const token = process.env.DEV_AUTH_BYPASS_TOKEN ?? "dev-bypass-token";
+
+  return {
+    enabled: true as const,
+    uid,
+    email,
+    token
+  };
+}
+
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
@@ -56,6 +93,24 @@ export async function middleware(request: NextRequest) {
 
   if (request.method === "OPTIONS" || isPublicPath(pathname)) {
     return NextResponse.next();
+  }
+
+  const devBypass = getDevBypassConfig();
+  if (devBypass.enabled) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(AUTH_HEADER_UID, devBypass.uid);
+    if (devBypass.email) {
+      requestHeaders.set(AUTH_HEADER_EMAIL, devBypass.email);
+    } else {
+      requestHeaders.delete(AUTH_HEADER_EMAIL);
+    }
+    requestHeaders.set(AUTH_HEADER_TOKEN, devBypass.token);
+
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders
+      }
+    });
   }
 
   const token = getTokenFromRequest(request);

@@ -69,6 +69,8 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
    pnpm test:e2e
    ```
 
+## Authentication Setup
+
 ## Environment Variables
 
 | Variable | Scope | Purpose |
@@ -120,5 +122,23 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 - Environment validation fails fast via `src/config/env.ts` to prevent misconfiguration at runtime.
 - Provider integrations and email logic are intentionally light – replace TODO sections as APIs become available.
 - Repository assumes PNPM; adjust scripts if using npm or yarn.
+
+### Production Authentication Checklist
+
+Follow these steps before promoting a build that relies on real authentication:
+
+1. **Disable the dev bypass**
+   - Confirm `DEV_AUTH_BYPASS` (and related UID/email overrides) are unset in the production environment. These variables are meant for local `pnpm dev` only.
+2. **Configure Firebase Auth**
+   - In the Firebase Console, enable the Google sign-in provider and set the OAuth redirect domain (e.g., `your-app.vercel.app`).
+   - Download a production service account key, store it as secrets (`FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`), and update `FIREBASE_PROJECT_ID`/`NEXT_PUBLIC_FIREBASE_*` to match.
+3. **Install middleware session handling**
+   - Ensure hosting (Vercel or custom Node runtime) forwards requests through `middleware.ts`. No extra work is needed on Vercel; other deployments must support Next.js middleware.
+4. **Supply public client config**
+   - Set `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, and `NEXT_PUBLIC_FIREBASE_APP_ID` for the production Firebase web app so the browser SDK can initialize.
+5. **Lock down server-side verification**
+   - Keep `getPublicEnv()` returning the production values; the middleware uses them to validate ID tokens via Firebase Identity Toolkit.
+6. **Validate end-to-end**
+   - Run `pnpm test:e2e` (or the CI workflow) with the production configuration. Manually sign in via Google on a staging URL to confirm redirects, headers, and session persistence before merging to `main`.
 
 Happy building!

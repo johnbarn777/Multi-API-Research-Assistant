@@ -29,6 +29,8 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 
 > **Follow-up:** `middleware.ts` now uses Firebase's Identity Toolkit REST API to validate ID tokens so the Edge runtime and `pnpm dev` bundler no longer attempt to import `firebase-admin` (which depends on unsupported `node:` modules).
 
+> **Deviation (local dev only):** Added an environment-guarded `DEV_AUTH_BYPASS` path in the middleware so `pnpm dev` can load authenticated pages without a Firebase sign-in. Leave disabled for production builds.
+
 **Testing**
 - ~~Unit: Vitest tests for middleware token parsing using mocked `verifyIdToken`, ensuring unauthorized requests short-circuit with 302/401.~~ (`tests/unit/middleware.test.ts`)
 - ~~Integration: Supertest against `/api/research` stub to ensure 401 without auth header and 200 with valid mock token.~~ (`tests/integration/api-research.test.ts`)

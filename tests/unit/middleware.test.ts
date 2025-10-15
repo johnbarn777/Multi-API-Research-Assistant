@@ -15,6 +15,31 @@ vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
 
 const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 
+const DEV_BYPASS_ENV_KEYS = [
+  "DEV_AUTH_BYPASS",
+  "NEXT_PUBLIC_DEV_AUTH_BYPASS",
+  "DEV_AUTH_BYPASS_UID",
+  "DEV_AUTH_BYPASS_EMAIL",
+  "DEV_AUTH_BYPASS_TOKEN"
+] as const;
+
+const originalDevBypassEnv: Record<(typeof DEV_BYPASS_ENV_KEYS)[number], string | undefined> =
+  DEV_BYPASS_ENV_KEYS.reduce((acc, key) => {
+    acc[key] = process.env[key];
+    return acc;
+  }, {} as Record<(typeof DEV_BYPASS_ENV_KEYS)[number], string | undefined>);
+
+function resetDevBypassEnv() {
+  for (const key of DEV_BYPASS_ENV_KEYS) {
+    const value = originalDevBypassEnv[key];
+    if (typeof value === "undefined") {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
 function createRequest(url: string, init?: RequestInit) {
   return new NextRequest(new URL(url), init);
 }
@@ -45,6 +70,7 @@ function decodeRequestHeaders(response: Response) {
 describe("middleware", () => {
   beforeEach(() => {
     verifyFirebaseIdToken.mockReset();
+    resetDevBypassEnv();
   });
 
   it("returns 401 for API routes without credentials", async () => {
@@ -88,5 +114,24 @@ describe("middleware", () => {
     expect(headers?.[AUTH_HEADER_UID]).toBe("abc123");
     expect(headers?.[AUTH_HEADER_EMAIL]).toBe("user@example.com");
     expect(headers?.[AUTH_HEADER_TOKEN]).toBe("valid-token");
+  });
+
+  it("short-circuits authentication when dev bypass is enabled", async () => {
+    process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS = "true";
+    process.env.DEV_AUTH_BYPASS_UID = "dev-user";
+    process.env.DEV_AUTH_BYPASS_EMAIL = "dev@example.com";
+    process.env.DEV_AUTH_BYPASS_TOKEN = "stub-token";
+
+    const request = createRequest("http://localhost/dashboard");
+    const response = await middleware(request);
+
+    expect(response.status).toBe(200);
+    expect(verifyFirebaseIdToken).not.toHaveBeenCalled();
+
+    const headers = decodeRequestHeaders(response);
+    expect(headers).toBeTruthy();
+    expect(headers?.[AUTH_HEADER_UID]).toBe("dev-user");
+    expect(headers?.[AUTH_HEADER_EMAIL]).toBe("dev@example.com");
+    expect(headers?.[AUTH_HEADER_TOKEN]).toBe("stub-token");
   });
 });

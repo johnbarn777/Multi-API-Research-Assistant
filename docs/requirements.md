@@ -602,6 +602,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
 * **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).
+* **Dev Auth Bypass**: Local developers blocked on Firebase sign-in can export `DEV_AUTH_BYPASS=true` (with optional UID/email overrides) to have the middleware inject a stub user during `pnpm dev`; keep unset in production.
 
 ---
 
