@@ -7,13 +7,13 @@ import {
   AUTH_HEADER_UID
 } from "@/server/auth/session";
 
-const verifyIdToken = vi.fn();
-
-vi.mock("@/lib/firebase/admin", () => ({
-  adminAuth: vi.fn(() => ({
-    verifyIdToken
-  }))
+const mockTokenVerifier = vi.hoisted(() => ({
+  verifyFirebaseIdToken: vi.fn()
 }));
+
+vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
+
+const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 
 function createRequest(url: string, init?: RequestInit) {
   return new NextRequest(new URL(url), init);
@@ -44,7 +44,7 @@ function decodeRequestHeaders(response: Response) {
 
 describe("middleware", () => {
   beforeEach(() => {
-    verifyIdToken.mockReset();
+    verifyFirebaseIdToken.mockReset();
   });
 
   it("returns 401 for API routes without credentials", async () => {
@@ -53,7 +53,7 @@ describe("middleware", () => {
 
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "Unauthorized" });
-    expect(verifyIdToken).not.toHaveBeenCalled();
+    expect(verifyFirebaseIdToken).not.toHaveBeenCalled();
   });
 
   it("redirects unauthenticated page requests to the landing page", async () => {
@@ -67,7 +67,10 @@ describe("middleware", () => {
   });
 
   it("injects Firebase identity headers when verification succeeds", async () => {
-    verifyIdToken.mockResolvedValue({ uid: "abc123", email: "user@example.com" });
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "abc123",
+      email: "user@example.com"
+    });
 
     const request = createRequest("http://localhost/api/research", {
       headers: {
@@ -78,7 +81,7 @@ describe("middleware", () => {
     const response = await middleware(request);
 
     expect(response.status).toBe(200);
-    expect(verifyIdToken).toHaveBeenCalledWith("valid-token");
+    expect(verifyFirebaseIdToken).toHaveBeenCalledWith("valid-token");
 
     const headers = decodeRequestHeaders(response);
     expect(headers).toBeTruthy();

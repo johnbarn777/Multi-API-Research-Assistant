@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { adminAuth } from "@/lib/firebase/admin";
+import { verifyFirebaseIdToken } from "@/lib/firebase/tokenVerifier";
 import {
   AUTH_HEADER_EMAIL,
   AUTH_HEADER_TOKEN,
@@ -64,11 +64,15 @@ export async function middleware(request: NextRequest) {
   }
 
   try {
-    const decoded = await adminAuth().verifyIdToken(token);
+    const decoded = await verifyFirebaseIdToken(token);
 
     const requestHeaders = new Headers(request.headers);
     requestHeaders.set(AUTH_HEADER_UID, decoded.uid);
-    requestHeaders.set(AUTH_HEADER_EMAIL, decoded.email ?? "");
+    if (decoded.email) {
+      requestHeaders.set(AUTH_HEADER_EMAIL, decoded.email);
+    } else {
+      requestHeaders.delete(AUTH_HEADER_EMAIL);
+    }
     requestHeaders.set(AUTH_HEADER_TOKEN, token);
 
     return NextResponse.next({

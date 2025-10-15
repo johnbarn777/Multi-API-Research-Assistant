@@ -14,7 +14,13 @@ import {
 } from "@/server/repositories/researchRepository";
 import { Timestamp } from "firebase-admin/firestore";
 
-const verifyIdToken = vi.fn();
+const mockTokenVerifier = vi.hoisted(() => ({
+  verifyFirebaseIdToken: vi.fn()
+}));
+
+vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
+
+const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 
 class InMemoryResearchRepository implements ResearchRepository {
   private store: Research[] = [];
@@ -93,12 +99,6 @@ class InMemoryResearchRepository implements ResearchRepository {
     };
   }
 }
-
-vi.mock("@/lib/firebase/admin", () => ({
-  adminAuth: vi.fn(() => ({
-    verifyIdToken
-  }))
-}));
 
 function headersFromNode(headers: NodeJS.Dict<string | string[]>) {
   const result = new Headers();
@@ -193,7 +193,7 @@ function createApp() {
 
 describe("API /api/research", () => {
   beforeEach(() => {
-    verifyIdToken.mockReset();
+    verifyFirebaseIdToken.mockReset();
     setResearchRepository(new InMemoryResearchRepository());
   });
 
@@ -207,11 +207,14 @@ describe("API /api/research", () => {
     const response = await request(app).get("/api/research").expect(401);
 
     expect(response.body).toEqual({ error: "Unauthorized" });
-    expect(verifyIdToken).not.toHaveBeenCalled();
+    expect(verifyFirebaseIdToken).not.toHaveBeenCalled();
   });
 
   it("returns a paginated list for the authenticated user", async () => {
-    verifyIdToken.mockResolvedValue({ uid: "test-user", email: "user@example.com" });
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
     const app = createApp();
 
     // Seed data via POST
@@ -232,7 +235,7 @@ describe("API /api/research", () => {
       .set("Authorization", "Bearer valid-token")
       .expect(200);
 
-    expect(verifyIdToken).toHaveBeenCalledWith("valid-token");
+    expect(verifyFirebaseIdToken).toHaveBeenCalledWith("valid-token");
     expect(response.body.items).toHaveLength(2);
     expect(response.body.items[0].title).toBe("Second");
     expect(response.body.items[1].title).toBe("First");
@@ -241,7 +244,10 @@ describe("API /api/research", () => {
   });
 
   it("rejects invalid create payloads", async () => {
-    verifyIdToken.mockResolvedValue({ uid: "test-user", email: "user@example.com" });
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
     const app = createApp();
 
     const response = await request(app)
