@@ -1,0 +1,96 @@
+# Multi-API Deep Research Assistant
+
+This repository scaffolds a Next.js 15 full-stack application that orchestrates OpenAI Deep Research, Google Gemini, PDF report generation, and email delivery. Functionality is intentionally stubbed – the goal is to provide a clear, scalable structure that you can iterate on quickly.
+
+## Stack Overview
+
+- **Framework:** Next.js 15 App Router + React + TypeScript
+- **Styling:** Tailwind CSS with utility-first design
+- **Auth & Data:** Firebase Auth (Google provider) + Firestore
+- **Integrations:** OpenAI Deep Research, Google Gemini, pdf-lib, Gmail API (OAuth), SendGrid fallback
+- **Testing:** Vitest (unit & integration), Supertest, Playwright (E2E), MSW for mocks
+- **Hosting:** Designed for Vercel deployment (Edge for UI, Node runtime for heavy tasks)
+
+## Repository Layout
+
+```
+.
+├── app/                     # Next.js App Router routes (UI + API placeholders)
+├── src/
+│   ├── components/          # Reusable UI and research components
+│   ├── config/              # Typed environment variable parsing
+│   ├── lib/                 # Firebase wrappers, providers, email, PDF helpers
+│   ├── server/              # Backend orchestration + state machine utilities
+│   ├── tests/               # Shared test utilities and mocks
+│   └── types/               # Shared TypeScript contracts
+├── tests/                   # Unit, integration, and E2E suites
+├── playwright.config.ts     # Playwright configuration for E2E tests
+├── vitest.config.ts         # Vitest unit test configuration
+├── vitest.integration.config.ts
+└── .env.example             # Required environment variables
+```
+
+### Key App Router Paths
+
+- `/` – Marketing landing page placeholder
+- `/sign-in` – Google sign-in stub (Firebase integration pending)
+- `/dashboard` – Authenticated dashboard layout with mock research cards
+- `/research/new` – Form stub for creating a research session
+- `/research/[id]` – Refinement loop vision + provider progress panels
+- `/api/auth/session` – Firebase session validation placeholder
+- `/api/research` + nested routes – CRUD + workflow endpoints ready for implementation
+
+## Getting Started
+
+1. **Install dependencies**
+
+   ```bash
+   pnpm install
+   ```
+
+2. **Set environment**
+
+   ```bash
+   cp .env.example .env.local
+   # populate values before running the app
+   ```
+
+3. **Run the dev server**
+
+   ```bash
+   pnpm dev
+   ```
+
+4. **Run tests**
+
+   ```bash
+   pnpm test:unit
+   pnpm test:integration
+   pnpm test:e2e
+   ```
+
+## Implementation Roadmap
+
+- **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope.
+- **Firestore:** Replace stubbed responses with Firestore reads/writes, enforce ownership checks per requirement.
+- **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openai.ts`.
+- **Gemini:** Wire `runGeminiResearch` to invoke the appropriate Gemini model and normalize the output.
+- **PDF & Email:** Expand `buildResearchPdf` for full layout, then send via Gmail or SendGrid using `sendResearchReport`.
+- **State Machine:** Use `src/server/research/state-machine.ts` to validate transitions, surface errors consistently via `AppError`.
+- **Testing:** Add emulator-backed integration tests and Playwright scenarios once the API contracts are fulfilled.
+- **CI/CD:** Create GitHub Actions workflow (lint + tests) and configure Vercel project settings when deploying.
+
+## Testing Strategy
+
+- **Unit:** Vitest + Testing Library for UI/state logic; sample test provided for research state machine.
+- **Integration:** Vitest (node environment) + Supertest for API routes; tests are currently `skip`ped pending implementation.
+- **E2E:** Playwright targets major browsers + mobile viewport; stub in place for future flows.
+
+## Additional Notes
+
+- Tailwind configuration lives in `tailwind.config.ts`, with global styles in `app/globals.css`.
+- Environment validation fails fast via `src/config/env.ts` to prevent misconfiguration at runtime.
+- Provider integrations and email logic are intentionally light – replace TODO sections as APIs become available.
+- Repository assumes PNPM; adjust scripts if using npm or yarn.
+
+Happy building!
