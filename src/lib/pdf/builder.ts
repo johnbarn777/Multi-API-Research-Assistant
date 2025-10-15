@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { ProviderResult } from "@/types/providers";
+import type { ProviderResult } from "@/types/research";
 
 export type PdfPayload = {
   title: string;

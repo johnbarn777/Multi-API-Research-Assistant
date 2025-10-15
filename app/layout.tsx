@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { ReactNode } from "react";
+import { AuthProvider } from "@/lib/firebase/auth-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,7 +13,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-slate-950 text-slate-100">
-        <div className="min-h-screen">{children}</div>
+        <AuthProvider>
+          <div className="min-h-screen">{children}</div>
+        </AuthProvider>
       </body>
     </html>
   );
