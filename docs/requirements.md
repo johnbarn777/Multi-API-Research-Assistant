@@ -373,9 +373,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Acceptance Criteria**
 
-* AC1: `POST /api/research` creates doc with `awaiting_refinements`.
-* AC2: Back-end opens DR session and stores `dr.sessionId` + initial questions array; sets `status: refining` if questions exist.
-* AC3: UI shows first question.
+* AC1: `POST /api/research` creates the document and defaults to `status: "awaiting_refinements"` with sanitized title.
+* AC2: When the provider returns initial questions, the handler stores `dr.sessionId`, snapshots the array, and transitions status to `"refining"`.
+* AC3: UI form submits a topic, optimistic updates the dashboard list, and redirects to the detail page to continue refinements.
 
 **Unit**
 
@@ -384,8 +384,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Integration**
 
-* IT1: `POST /api/research` → Firestore write + DR call mock → stored doc matches shape.
-* IT2: Error path: DR unavailable → set `status: failed` and surface toast.
+* IT1: `POST /api/research` → Firestore write + DR call mock → stored doc matches shape (`sessionId`, `questions`, status).
+* IT2: Error path: DR unavailable → API returns `502` with `{ error }`; no document created so user can retry.
+* IT3: `GET /api/research/:id` → returns owner-scoped document with initial questions surfaced for the UI.
 
 **E2E**
 
@@ -393,8 +394,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Pass/Fail**
 
-* **Pass:** Document state transitions and questions rendered.
-* **Fail:** Session id not stored or questions missing when provider returns them.
+* **Pass:** Document persists with session metadata, dashboard reflects new entry immediately, `/research/[id]` renders the first question, and user is routed to continue refinements.
+* **Fail:** Session id missing, questions not stored when provided, question view not hydrated, or API fails to surface actionable error on provider failure.
 
 ---
 

@@ -15,7 +15,7 @@ export const handlers = [
       ]
     });
   }),
-  http.post(`${GEMINI_BASE}/models/*:generateContent`, () => {
+  http.post(`${GEMINI_BASE}/models/:model\\:generateContent`, () => {
     return HttpResponse.json({
       candidates: [
         {

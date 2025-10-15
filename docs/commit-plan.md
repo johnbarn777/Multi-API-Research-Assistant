@@ -66,14 +66,15 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 5: Research creation API & UI flow start
 
 **Implementation Steps**
-- Implement `/api/research` POST route to validate payload, create Firestore doc, call `startSession`, store session/questions, and return JSON.
-- Implement `/api/research` GET route for paginated dashboard data using repository.
-- Create `/app/research/new/page.tsx` with authenticated form to submit a topic and redirect to detail page.
-- Add optimistic UI update to dashboard list via SWR/React Query or simple revalidation.
+- ~~Implement `/api/research` POST route to validate payload, create Firestore doc, call `startSession`, store session/questions, and return JSON.~~
+- ~~Implement `/api/research` GET route for paginated dashboard data using repository.~~
+- ~~Create `/app/research/new/page.tsx` with authenticated form to submit a topic and redirect to detail page.~~
+- ~~Add optimistic UI update to dashboard list via SWR/React Query or simple revalidation.~~ _(SWR adopted for cache + optimistic prepend.)_
+- ~~Hydrate `/research/[id]` page from the new API so the first refinement question renders immediately after creation.~~
 
 **Testing**
-- Unit: Schema validation tests for create payload; ensure failure when `title` empty or > length.
-- Integration: Supertest covering success path (mocking OpenAI) and provider failure fallback to `status: failed` with error message stored.
+- Unit: Schema validation tests for create payload; ensure failure when `title` empty or > length. _(Deferred – to be added with broader validation coverage.)_
+- ~~Integration: Supertest covering success path (mocking OpenAI) and provider failure fallback to `status: failed` with error message stored.~~ _(Implemented as a 502 retry response; no Firestore write on provider failure. Tests: `pnpm test:integration`.)_
 - E2E: Playwright test for new research creation showing first question (after next commit hooking detail view).
 
 ## Commit 6: Refinement loop API + client components

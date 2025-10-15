@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
+import { startSession as startOpenAiSession } from "@/lib/providers/openaiDeepResearch";
 import { getResearchRepository } from "@/server/repositories/researchRepository";
-import type { Research } from "@/types/research";
 import { z } from "zod";
+import { logger } from "@/lib/utils/logger";
+import { serializeResearch } from "./serialize";
 
 const createResearchSchema = z.object({
   title: z
@@ -10,14 +12,6 @@ const createResearchSchema = z.object({
     .min(1, "title is required")
     .max(200, "title must be 200 characters or fewer")
 });
-
-function serializeResearch(research: Research) {
-  return {
-    ...research,
-    createdAt: research.createdAt.toDate().toISOString(),
-    updatedAt: research.updatedAt.toDate().toISOString()
-  };
-}
 
 export async function GET(request: NextRequest) {
   const sessionOrResponse = ensureAuthenticated(request, "Unauthorized");
@@ -89,11 +83,31 @@ export async function POST(request: NextRequest) {
   }
 
   const repository = getResearchRepository();
+  const title = parsed.data.title.trim();
+
+  const openAiSession = await startOpenAiSession({ topic: title }).catch((error) => {
+    logger.error("api.research.start_session_failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  });
+
+  if (!openAiSession) {
+    return NextResponse.json(
+      { error: "Failed to start OpenAI Deep Research session" },
+      { status: 502 }
+    );
+  }
 
   try {
     const created = await repository.create({
       ownerUid: sessionOrResponse.uid,
-      title: parsed.data.title
+      title,
+      status: openAiSession.questions.length > 0 ? "refining" : "awaiting_refinements",
+      dr: {
+        sessionId: openAiSession.sessionId,
+        questions: openAiSession.questions
+      }
     });
 
     return NextResponse.json(

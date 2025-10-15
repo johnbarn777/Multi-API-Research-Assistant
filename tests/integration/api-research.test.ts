@@ -4,23 +4,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { middleware } from "../../middleware";
 import { GET, POST } from "../../app/api/research/route";
-import { AUTH_HEADER_UID } from "@/server/auth/session";
+import { GET as GET_BY_ID } from "../../app/api/research/[id]/route";
+import { AUTH_HEADER_UID, ForbiddenError } from "@/server/auth/session";
 import {
-  type Research,
   type ResearchRepository,
   type PaginatedResearchResult,
   type CreateResearchInput,
   setResearchRepository
 } from "@/server/repositories/researchRepository";
+import type { Research } from "@/types/research";
 import { Timestamp } from "firebase-admin/firestore";
 
 const mockTokenVerifier = vi.hoisted(() => ({
   verifyFirebaseIdToken: vi.fn()
 }));
 
+const mockOpenAiDeepResearch = vi.hoisted(() => ({
+  startSession: vi.fn()
+}));
+
 vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
+vi.mock("@/lib/providers/openaiDeepResearch", () => mockOpenAiDeepResearch);
 
 const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
+const startSession = mockOpenAiDeepResearch.startSession;
 
 class InMemoryResearchRepository implements ResearchRepository {
   private store: Research[] = [];
@@ -71,8 +78,17 @@ class InMemoryResearchRepository implements ResearchRepository {
     throw new Error("Not implemented in in-memory repository");
   }
 
-  async getById(): Promise<Research | null> {
-    throw new Error("Not implemented in in-memory repository");
+  async getById(id: string, options?: { ownerUid?: string }): Promise<Research | null> {
+    const found = this.store.find((item) => item.id === id);
+    if (!found) {
+      return null;
+    }
+
+    if (options?.ownerUid && found.ownerUid !== options.ownerUid) {
+      throw new ForbiddenError("You do not have access to this research");
+    }
+
+    return found;
   }
 
   async listByOwner(ownerUid: string, options?: { limit?: number; cursor?: string | null }): Promise<PaginatedResearchResult> {
@@ -176,6 +192,17 @@ function createApp() {
     await applyNextResponse(res, response);
   });
 
+  app.get("/api/research/:id", async (req, res) => {
+    const url = new URL(req.originalUrl || req.url, `http://${req.headers.host ?? "localhost"}`);
+    const nextReq = new NextRequest(url, {
+      method: "GET",
+      headers: headersFromNode(req.headers as Record<string, string | string[]>)
+    });
+
+    const response = await GET_BY_ID(nextReq, { params: { id: req.params.id } });
+    await applyNextResponse(res, response);
+  });
+
   app.post("/api/research", async (req, res) => {
     const url = new URL(req.originalUrl || req.url, `http://${req.headers.host ?? "localhost"}`);
     const nextReq = new NextRequest(url, {
@@ -192,9 +219,13 @@ function createApp() {
 }
 
 describe("API /api/research", () => {
+  let repository: InMemoryResearchRepository;
+
   beforeEach(() => {
     verifyFirebaseIdToken.mockReset();
-    setResearchRepository(new InMemoryResearchRepository());
+    startSession.mockReset();
+    repository = new InMemoryResearchRepository();
+    setResearchRepository(repository);
   });
 
   afterEach(() => {
@@ -214,6 +245,13 @@ describe("API /api/research", () => {
     verifyFirebaseIdToken.mockResolvedValue({
       uid: "test-user",
       email: "user@example.com"
+    });
+    startSession.mockResolvedValue({
+      sessionId: "session-123",
+      questions: [
+        { index: 1, text: "First question?" }
+      ],
+      raw: {}
     });
     const app = createApp();
 
@@ -239,6 +277,7 @@ describe("API /api/research", () => {
     expect(response.body.items).toHaveLength(2);
     expect(response.body.items[0].title).toBe("Second");
     expect(response.body.items[1].title).toBe("First");
+    expect(response.body.items[0].status).toBe("refining");
     expect(response.body.items[0]).not.toHaveProperty("createdAt", undefined);
     expect(response.headers[AUTH_HEADER_UID]).toBeUndefined();
   });
@@ -247,6 +286,11 @@ describe("API /api/research", () => {
     verifyFirebaseIdToken.mockResolvedValue({
       uid: "test-user",
       email: "user@example.com"
+    });
+    startSession.mockResolvedValue({
+      sessionId: "session-123",
+      questions: [],
+      raw: {}
     });
     const app = createApp();
 
@@ -257,6 +301,85 @@ describe("API /api/research", () => {
       .expect(400);
 
     expect(response.body.error).toBe("Invalid request");
+  });
+
+  it("returns 502 when OpenAI Deep Research session fails", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+    startSession.mockRejectedValue(new Error("upstream error"));
+    const app = createApp();
+
+    const response = await request(app)
+      .post("/api/research")
+      .set("Authorization", "Bearer valid-token")
+      .send({ title: "Fails" })
+      .expect(502);
+
+    expect(response.body).toEqual({
+      error: "Failed to start OpenAI Deep Research session"
+    });
+  });
+
+  it("returns a research document for the owner", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+    startSession.mockResolvedValue({
+      sessionId: "session-123",
+      questions: [{ index: 1, text: "First question?" }],
+      raw: {}
+    });
+
+    const app = createApp();
+
+    const creation = await request(app)
+      .post("/api/research")
+      .set("Authorization", "Bearer valid-token")
+      .send({ title: "Topic" })
+      .expect(201);
+
+    const researchId: string = creation.body.item.id;
+
+    const response = await request(app)
+      .get(`/api/research/${researchId}`)
+      .set("Authorization", "Bearer valid-token")
+      .expect(200);
+
+    expect(response.body.item.id).toBe(researchId);
+    expect(response.body.item.dr.sessionId).toBe("session-123");
+    expect(response.body.item.dr.questions).toHaveLength(1);
+  });
+
+  it("returns 404 when research is missing", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+    const app = createApp();
+
+    await request(app)
+      .get("/api/research/missing-id")
+      .set("Authorization", "Bearer valid-token")
+      .expect(404);
+  });
+
+  it("returns 403 when accessing another user's research", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "other-user",
+      email: "other@example.com"
+    });
+
+    const created = await repository.create({ ownerUid: "owner-123", title: "Private" });
+
+    const app = createApp();
+
+    await request(app)
+      .get(`/api/research/${created.id}`)
+      .set("Authorization", "Bearer valid-token")
+      .expect(403);
   });
 });
 
