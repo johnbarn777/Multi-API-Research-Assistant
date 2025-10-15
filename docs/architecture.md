@@ -13,7 +13,7 @@
 - `app/` – Next.js routes. UI pages and REST-like API endpoints.
 - `src/components/` – Reusable presentational components (cards, progress indicators, refinement UI).
 - `src/config/` – Environment parsing and validation.
-- `src/lib/` – Provider wrappers, Firebase helpers, utilities for PDF/email/logging.
+- `src/lib/` – Provider wrappers, response normalizers, Firebase helpers, utilities for PDF/email/logging.
 - `src/lib/security/` – Encryption helpers for Gmail OAuth tokens and future secret utilities.
 - `src/server/` – Orchestration logic and state machine enforcing valid status transitions.
 - `src/server/repositories/` – Firestore data access layer containing strongly-typed repositories for research and user documents.
@@ -46,6 +46,9 @@
 ## Observability
 
 - Structured JSON logging (`src/lib/utils/logger.ts`) to pipe context (request id, research id, provider).
+- Provider integrations emit `provider.request.*` and `gemini.generate.*` logs around retries/poll attempts so transient
+  failures are traceable; exponential backoff (max 3 attempts per HTTP request) is built into both OpenAI Deep Research and
+  Gemini wrappers.
 - Surface metrics (counts by status, duration averages) using a future instrumentation layer or third-party service.
 
 ## TODO Highlights

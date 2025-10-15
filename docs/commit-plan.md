@@ -52,14 +52,14 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 4: Provider abstractions (OpenAI DR & Gemini)
 
 **Implementation Steps**
-- Implement `src/lib/providers/openaiDeepResearch.ts` with methods `startSession`, `submitAnswer`, `executeRun`, `pollResult` using fetch with exponential backoff.
-- Implement `src/lib/providers/gemini.ts` with `generateContent` and optional polling wrapper.
-- Introduce `src/lib/providers/normalizers.ts` to map raw payloads into `ProviderResult` shape.
-- Wire configuration to use base URLs/models from env helpers.
-- Ensure logging instrumentation via existing logger utility.
+- ~~Implement `src/lib/providers/openaiDeepResearch.ts` with methods `startSession`, `submitAnswer`, `executeRun`, `pollResult` using fetch with exponential backoff.~~
+- ~~Implement `src/lib/providers/gemini.ts` with `generateContent` and optional polling wrapper.~~
+- ~~Introduce `src/lib/providers/normalizers.ts` to map raw payloads into `ProviderResult` shape.~~
+- ~~Wire configuration to use base URLs/models from env helpers.~~
+- ~~Ensure logging instrumentation via existing logger utility.~~
 
 **Testing**
-- Unit: Vitest tests with MSW/nock to assert request payloads, retry logic, and normalization output for representative provider responses.
+- ~~Unit: Vitest tests with MSW/nock to assert request payloads, retry logic, and normalization output for representative provider responses.~~
 - Integration: None (will be covered when APIs invoke providers).
 - E2E: Not applicable.
 

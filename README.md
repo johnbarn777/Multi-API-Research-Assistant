@@ -103,8 +103,8 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 
 - **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope.
 - **Firestore:** Replace stubbed responses with Firestore reads/writes, enforce ownership checks per requirement.
-- **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openai.ts`.
-- **Gemini:** Wire `runGeminiResearch` to invoke the appropriate Gemini model and normalize the output.
+- **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openaiDeepResearch.ts`.
+- **Gemini:** Wire `generateContent` to invoke the appropriate Gemini model (with polling when required) and normalize the output.
 - **PDF & Email:** Expand `buildResearchPdf` for full layout, then send via Gmail or SendGrid using `sendResearchReport`.
 - **State Machine:** Use `src/server/research/state-machine.ts` to validate transitions, surface errors consistently via `AppError`.
 - **Testing:** Add emulator-backed integration tests and Playwright scenarios once the API contracts are fulfilled.
