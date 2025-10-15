@@ -19,16 +19,18 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 2: Firebase initialization & auth middleware
 
 **Implementation Steps**
-- Implement Firebase Admin singleton in `src/lib/firebase/admin.ts` wiring Firestore and Auth.
-- Configure Firebase client SDK in `src/lib/firebase/client.ts` for use in the App Router.
-- Flesh out `middleware.ts` to verify Firebase ID tokens, inject `uid` and `email` into request headers, and redirect unauthenticated traffic to `/`.
-- Create `src/server/auth/session.ts` helpers for asserting authenticated requests inside API routes/server actions.
-- Add session-aware layout wrappers in `app/(auth)/layout.tsx` or relevant provider to surface `useAuth` hook state.
+- ~~Implement Firebase Admin singleton in `src/lib/firebase/admin.ts` wiring Firestore and Auth.~~
+- ~~Configure Firebase client SDK in `src/lib/firebase/client.ts` for use in the App Router.~~
+- ~~Flesh out `middleware.ts` to verify Firebase ID tokens, inject `uid` and `email` into request headers, and redirect unauthenticated traffic to `/sign-in` with the original path in `redirectedFrom`.~~
+- ~~Create `src/server/auth/session.ts` helpers for asserting authenticated requests inside API routes/server actions.~~
+- ~~Add session-aware layout wrappers in `app/(auth)/layout.tsx` and global providers to surface `useAuth` hook state.~~
+
+> **Note:** The redirect target was updated from `/` to `/sign-in` to align with the dedicated sign-in route and automated E2E coverage.
 
 **Testing**
-- Unit: Vitest tests for middleware token parsing using mocked `verifyIdToken`, ensuring unauthorized requests short-circuit with 302/401.
-- Integration: Supertest against `/api/research` stub to ensure 401 without auth header and 200 with valid mock token.
-- E2E: Playwright scenario verifying unauthenticated redirect to sign-in page.
+- ~~Unit: Vitest tests for middleware token parsing using mocked `verifyIdToken`, ensuring unauthorized requests short-circuit with 302/401.~~ (`tests/unit/middleware.test.ts`)
+- ~~Integration: Supertest against `/api/research` stub to ensure 401 without auth header and 200 with valid mock token.~~ (`tests/integration/api-research.test.ts`)
+- ~~E2E: Playwright scenario verifying unauthenticated redirect to sign-in page.~~ (`tests/e2e/research.spec.ts`; local `pnpm test:e2e` currently fails because Next's dev bundler cannot resolve the `node:` imports from `firebase-admin`. Follow-up fix required.)
 
 ## Commit 3: Firestore data access layer & models
 

@@ -19,6 +19,13 @@
 - `src/tests/` – Shared mocks (MSW, Firebase emulators) reuseable across test suites.
 - `tests/` – Unit, integration, and E2E test entry points.
 
+## Authentication & Session Handling
+
+- `middleware.ts` executes on every request (except public paths) and verifies Firebase ID tokens supplied via `Authorization: Bearer`, `x-firebase-id-token`, or supported session cookies. When verification succeeds it injects `x-user-uid`, `x-user-email`, and `x-firebase-id-token` headers before forwarding the request.
+- API routes leverage `src/server/auth/session.ts` helpers (`ensureAuthenticated`, `requireAuth`) to read the injected headers and short-circuit unauthorized calls with a `401` JSON response.
+- Page requests without valid credentials are redirected to `/sign-in?redirectedFrom=<path>`.
+- The React tree is wrapped with `AuthProvider` from `src/lib/firebase/auth-context.tsx` so client components can call `useAuth()` for loading state, the current Firebase user, and the latest ID token.
+
 ## Deployment Considerations
 
 - **Vercel Edge** for UI routes without heavy dependencies.
