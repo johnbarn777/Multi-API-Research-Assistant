@@ -35,14 +35,14 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 3: Firestore data access layer & models
 
 **Implementation Steps**
-- Define TypeScript models in `src/types/research.ts` aligning with the requirements (`Research`, `ProviderResult`).
-- Implement Firestore converters/repositories in `src/server/repositories/researchRepository.ts` supporting create, update, getById, listByOwner with pagination, and state transition checks.
-- Add user repository for Gmail OAuth token persistence.
-- Ensure server helpers enforce `ownerUid` authorization before returning data.
+- ~~Define TypeScript models in `src/types/research.ts` aligning with the requirements (`Research`, `ProviderResult`).~~
+- ~~Implement Firestore converters/repositories in `src/server/repositories/researchRepository.ts` supporting create, update, getById, listByOwner with pagination, and state transition checks.~~
+- ~~Add user repository for Gmail OAuth token persistence.~~
+- ~~Ensure server helpers enforce `ownerUid` authorization before returning data.~~
 
 **Testing**
-- Unit: Repository logic using Firebase emulator or mocked Firestore (success + invalid transitions).
-- Integration: Supertest hitting `/api/research` list/create endpoints with emulator to confirm persistence and authorization.
+- ~~Unit: Repository logic using Firebase emulator or mocked Firestore (success + invalid transitions).~~ (Covered via Vitest with an in-memory Firestore double.)
+- ~~Integration: Supertest hitting `/api/research` list/create endpoints with emulator to confirm persistence and authorization.~~ (Exercised with Supertest + middleware using an in-memory repository override.)
 - E2E: Not yet (no UI dependency).
 
 ## Commit 4: Provider abstractions (OpenAI DR & Gemini)

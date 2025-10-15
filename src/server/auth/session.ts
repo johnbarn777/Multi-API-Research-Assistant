@@ -21,6 +21,15 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class ForbiddenError extends Error {
+  public readonly statusCode = 403;
+
+  constructor(message = "Forbidden") {
+    super(message);
+    this.name = "ForbiddenError";
+  }
+}
+
 export function parseAuthHeaders(headers: HeaderLike): AuthSession | null {
   const uid = headers.get(AUTH_HEADER_UID);
   if (!uid) {
@@ -71,6 +80,18 @@ export function ensureAuthenticated(
 
 export function unauthorizedResponse(message = "Authentication required") {
   return NextResponse.json({ error: message }, { status: 401 });
+}
+
+export function forbiddenResponse(message = "Forbidden") {
+  return NextResponse.json({ error: message }, { status: 403 });
+}
+
+export function assertOwner<T extends { ownerUid: string }>(resource: T, uid: string): T {
+  if (resource.ownerUid !== uid) {
+    throw new ForbiddenError();
+  }
+
+  return resource;
 }
 
 export { AUTH_HEADER_UID, AUTH_HEADER_EMAIL, AUTH_HEADER_TOKEN };

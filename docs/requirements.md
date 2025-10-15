@@ -562,6 +562,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 **Test Execution Notes**
 
 * Initial `pnpm test:unit` run failed because Vitest lacked an alias for `@/`; fixed by updating `vitest.config.ts`/`vitest.integration.config.ts`, after which the suite passes.
+* Commit 3 introduces a typed Firestore data layer; repository unit tests (Vitest) validate state transitions & pagination, and integration coverage exercises `/api/research` create/list flows with middleware in place.
 
 ---
 
