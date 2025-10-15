@@ -38,9 +38,11 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "@testing-library/jest-dom": "^6.4.5",
     "@testing-library/react": "^15.0.0",
     "@testing-library/user-event": "^14.5.1",
+    "@types/express": "^5.0.3",
     "@types/node": "^20.16.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
@@ -50,6 +52,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.0",
     "eslint-config-next": "15.0.0-canary.36",
+    "express": "^5.1.0",
     "jsdom": "^24.1.1",
     "playwright": "^1.46.1",
     "postcss": "^8.4.45",

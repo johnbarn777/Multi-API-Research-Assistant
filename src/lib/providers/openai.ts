@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { getServerEnv } from "@/config/env";
-import type { ProviderResult } from "@/types/providers";
+import type { ProviderResult } from "@/types/research";
 
 let client: OpenAI | null = null;
 

@@ -16,8 +16,23 @@
 - `src/lib/` – Provider wrappers, Firebase helpers, utilities for PDF/email/logging.
 - `src/lib/security/` – Encryption helpers for Gmail OAuth tokens and future secret utilities.
 - `src/server/` – Orchestration logic and state machine enforcing valid status transitions.
+- `src/server/repositories/` – Firestore data access layer containing strongly-typed repositories for research and user documents.
 - `src/tests/` – Shared mocks (MSW, Firebase emulators) reuseable across test suites.
 - `tests/` – Unit, integration, and E2E test entry points.
+
+## Authentication & Session Handling
+
+- `middleware.ts` executes on every request (except public paths) and verifies Firebase ID tokens supplied via `Authorization: Bearer`, `x-firebase-id-token`, or supported session cookies. The middleware performs verification via Firebase's Identity Toolkit REST API so it can run inside the Edge runtime (avoiding the `firebase-admin` Node dependency). When verification succeeds it injects `x-user-uid`, `x-user-email`, and `x-firebase-id-token` headers before forwarding the request.
+- API routes leverage `src/server/auth/session.ts` helpers (`ensureAuthenticated`, `requireAuth`) to read the injected headers and short-circuit unauthorized calls with a `401` JSON response.
+- Page requests without valid credentials are redirected to `/sign-in?redirectedFrom=<path>`.
+- The React tree is wrapped with `AuthProvider` from `src/lib/firebase/auth-context.tsx` so client components can call `useAuth()` for loading state, the current Firebase user, and the latest ID token.
+
+## Data Access Layer
+
+- `FirestoreResearchRepository` owns conversions between Firestore documents and `Research` domain models, enforces the state machine (`awaiting_refinements → refining → ready_to_run → running → completed|failed`), and guarantees pagination stability using a base64 cursor that captures the `createdAt` timestamp + document id.
+- Repositories merge nested provider/report sub-objects safely and always stamp `createdAt`/`updatedAt` timestamps server-side.
+- `FirestoreUserRepository` persists Gmail OAuth token payloads alongside user profile metadata, allowing secure token refresh flows.
+- Repository instances are singletons by default, but tests can override them with in-memory doubles via `setResearchRepository`/`setUserRepository`.
 
 ## Deployment Considerations
 

@@ -1,22 +1,24 @@
 import { getServerEnv } from "@/config/env";
 import { App, cert, getApp, getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-import { getAuth } from "firebase-admin/auth";
+import { getAuth, type Auth } from "firebase-admin/auth";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 let adminApp: App | null = null;
+let authInstance: Auth | null = null;
+let firestoreInstance: Firestore | null = null;
 
 export function getFirebaseAdmin(): App {
   if (adminApp) {
     return adminApp;
   }
 
-  const env = getServerEnv();
-
-  const apps = getApps();
-  if (apps.length > 0) {
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
     adminApp = getApp();
     return adminApp;
   }
+
+  const env = getServerEnv();
 
   adminApp = initializeApp({
     credential: cert({
@@ -29,5 +31,21 @@ export function getFirebaseAdmin(): App {
   return adminApp;
 }
 
-export const adminAuth = () => getAuth(getFirebaseAdmin());
-export const adminDb = () => getFirestore(getFirebaseAdmin());
+export function getAdminAuth(): Auth {
+  if (!authInstance) {
+    authInstance = getAuth(getFirebaseAdmin());
+  }
+
+  return authInstance;
+}
+
+export function getAdminFirestore(): Firestore {
+  if (!firestoreInstance) {
+    firestoreInstance = getFirestore(getFirebaseAdmin());
+  }
+
+  return firestoreInstance;
+}
+
+export const adminAuth = () => getAdminAuth();
+export const adminDb = () => getAdminFirestore();
