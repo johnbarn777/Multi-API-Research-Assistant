@@ -1,5 +1,5 @@
 import sgMail from "@sendgrid/mail";
-import { getEnv } from "@/config/env";
+import { getServerEnv } from "@/config/env";
 
 export async function sendWithSendgrid(_: {
   to: string;
@@ -7,7 +7,7 @@ export async function sendWithSendgrid(_: {
   body: string;
   pdfBuffer: Buffer;
 }) {
-  const env = getEnv();
+  const env = getServerEnv();
   const apiKey = env.SENDGRID_API_KEY;
 
   if (!apiKey) {

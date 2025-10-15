@@ -2,13 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   experimental: {
-    typedRoutes: true,
-    serverActions: true
+    typedRoutes: true
   },
   eslint: {
     dirs: ["app", "src"]
   },
-  serverComponentsExternalPackages: [
+  serverExternalPackages: [
     "pdf-lib",
     "@sendgrid/mail",
     "googleapis",

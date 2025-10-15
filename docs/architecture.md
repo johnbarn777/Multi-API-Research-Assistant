@@ -14,6 +14,7 @@
 - `src/components/` – Reusable presentational components (cards, progress indicators, refinement UI).
 - `src/config/` – Environment parsing and validation.
 - `src/lib/` – Provider wrappers, Firebase helpers, utilities for PDF/email/logging.
+- `src/lib/security/` – Encryption helpers for Gmail OAuth tokens and future secret utilities.
 - `src/server/` – Orchestration logic and state machine enforcing valid status transitions.
 - `src/tests/` – Shared mocks (MSW, Firebase emulators) reuseable across test suites.
 - `tests/` – Unit, integration, and E2E test entry points.
@@ -23,6 +24,7 @@
 - **Vercel Edge** for UI routes without heavy dependencies.
 - **Node runtime** (Vercel Serverless Function) for provider calls, PDF generation, and email sending.
 - **Secrets** via Vercel environment variables. Gmail OAuth tokens should be encrypted (see `TOKEN_ENCRYPTION_KEY`).
+- Environment helpers (`getServerEnv` / `getPublicEnv`) ensure server secrets stay off the client bundle while still validating configuration with Zod.
 - **Firestore Indexes** – `research` collection should index `(ownerUid ASC, createdAt DESC)`.
 
 ## Observability

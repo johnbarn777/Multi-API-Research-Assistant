@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { getEnv } from "@/config/env";
+import { getServerEnv } from "@/config/env";
 import type { ProviderResult } from "@/types/providers";
 
 let client: OpenAI | null = null;
@@ -9,7 +9,7 @@ function getClient(): OpenAI {
     return client;
   }
 
-  const env = getEnv();
+  const env = getServerEnv();
   client = new OpenAI({
     apiKey: env.OPENAI_API_KEY,
     baseURL: env.OPENAI_DR_BASE_URL

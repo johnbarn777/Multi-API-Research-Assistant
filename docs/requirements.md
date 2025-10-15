@@ -311,15 +311,18 @@ GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 GOOGLE_OAUTH_REDIRECT_URI=
 GOOGLE_OAUTH_SCOPES="https://www.googleapis.com/auth/gmail.send"
-TOKEN_ENCRYPTION_KEY= # 32-byte base64 key
+TOKEN_ENCRYPTION_KEY= # 32-byte base64 key; generate with `openssl rand -base64 32`
 
 # Fallback Email
-SENDGRID_API_KEY=
+SENDGRID_API_KEY= # optional fallback provider key
 FROM_EMAIL=no-reply@yourapp.com
 
 # App
 APP_BASE_URL=https://your-vercel-domain.vercel.app
 ```
+
+Environment parsing now distinguishes server-only secrets from `NEXT_PUBLIC_*` client variables in `src/config/env.ts`, rejecting misconfiguration (including invalid base64 token keys) at startup and normalizing Firebase private keys.
+Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src/lib/security/crypto.ts`, keyed by `TOKEN_ENCRYPTION_KEY`.
 
 ---
 
@@ -532,6 +535,31 @@ APP_BASE_URL=https://your-vercel-domain.vercel.app
 
 * **Pass:** Accurate list + navigation.
 * **Fail:** Items from other users or wrong order.
+
+#### INF-1 Environment Configuration & Secrets
+
+**Acceptance Criteria**
+
+* AC1: `src/config/env.ts` validates required server vs client variables separately and fails fast on missing/invalid values.
+* AC2: `TOKEN_ENCRYPTION_KEY` must be a 32-byte base64 string used to decrypt Gmail OAuth payloads.
+* AC3: Gmail OAuth tokens can be round-tripped via AES-256-GCM helpers in `src/lib/security/crypto.ts`.
+
+**Unit**
+
+* UT1: `tests/unit/env.test.ts` covers happy-path parsing and missing variable failures.
+* UT2: `tests/unit/crypto.test.ts` exercises encrypt/decrypt round-trip with sample key.
+
+**Integration**
+
+* Not applicable (no external services invoked).
+
+**E2E**
+
+* Not applicable.
+
+**Test Execution Notes**
+
+* Initial `pnpm test:unit` run failed because Vitest lacked an alias for `@/`; fixed by updating `vitest.config.ts`/`vitest.integration.config.ts`, after which the suite passes.
 
 ---
 

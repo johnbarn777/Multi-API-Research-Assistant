@@ -1,7 +1,7 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
-import { getEnv } from "@/config/env";
+import { getPublicEnv } from "@/config/env";
 
 let clientApp: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
@@ -12,7 +12,7 @@ export function getFirebaseClient(): FirebaseApp {
     return clientApp;
   }
 
-  const env = getEnv();
+  const env = getPublicEnv();
 
   clientApp =
     getApps().find((app) => app.name === "client") ??

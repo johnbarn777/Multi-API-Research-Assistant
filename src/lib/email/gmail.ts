@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { getEnv } from "@/config/env";
+import { getServerEnv } from "@/config/env";
 
 export type GmailTokens = {
   access_token: string;
@@ -15,7 +15,7 @@ export async function sendWithGmail(_: {
   pdfBuffer: Buffer;
   tokens: GmailTokens;
 }) {
-  const env = getEnv();
+  const env = getServerEnv();
   const oauth2Client = new google.auth.OAuth2(
     env.GOOGLE_OAUTH_CLIENT_ID,
     env.GOOGLE_OAUTH_CLIENT_SECRET,

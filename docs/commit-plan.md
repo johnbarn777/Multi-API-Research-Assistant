@@ -5,13 +5,14 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 1: Harden environment configuration & provider secrets plumbing
 
 **Implementation Steps**
-- Expand `src/config/env.ts` to validate all required environment variables (Firebase, OpenAI DR, Gemini, Gmail OAuth, SendGrid, app URL) using Zod.
-- Export typed helpers for web (`NEXT_PUBLIC_*`) vs server-only secrets to ensure tree-shaking.
-- Add utility for decrypting Gmail OAuth tokens using `TOKEN_ENCRYPTION_KEY` in `src/lib/security/crypto.ts`.
-- Update documentation (`README.md`, `.env.example`) with the full variable list and notes for local emulator usage.
+- ~~Expand `src/config/env.ts` to validate all required environment variables (Firebase, OpenAI DR, Gemini, Gmail OAuth, SendGrid, app URL) using Zod.~~
+- ~~Export typed helpers for web (`NEXT_PUBLIC_*`) vs server-only secrets to ensure tree-shaking.~~
+- ~~Add utility for decrypting Gmail OAuth tokens using `TOKEN_ENCRYPTION_KEY` in `src/lib/security/crypto.ts`.~~
+- ~~Update documentation (`README.md`, `.env.example`) with the full variable list and notes for local emulator usage.~~
+- Added Vitest/Vite alias configuration (`vitest.config.ts`, `vitest.integration.config.ts`) so the new unit tests resolve `@/` imports.
 
 **Testing**
-- Unit: Vitest coverage for env parser (happy path + missing variable failures) and crypto helper (round-trip encrypt/decrypt using sample key).
+- ~~Unit: Vitest coverage for env parser (happy path + missing variable failures) and crypto helper (round-trip encrypt/decrypt using sample key).~~ (`tests/unit/env.test.ts`, `tests/unit/crypto.test.ts`; `pnpm test:unit` passes after alias fix.)
 - Integration: None (configuration only).
 - E2E: Not applicable.
 

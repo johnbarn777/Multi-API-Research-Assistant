@@ -69,6 +69,34 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
    pnpm test:e2e
    ```
 
+## Environment Variables
+
+| Variable | Scope | Purpose |
+| --- | --- | --- |
+| `FIREBASE_PROJECT_ID` | server | Firebase project ID (matches emulator project when running locally). |
+| `FIREBASE_CLIENT_EMAIL` | server | Service account email used by Firebase Admin SDK. |
+| `FIREBASE_PRIVATE_KEY` | server | Service account private key; multiline values with `\n` are normalized automatically. |
+| `OPENAI_API_KEY` / `OPENAI_DR_BASE_URL` | server | Credentials and base URL for OpenAI Deep Research. |
+| `GEMINI_API_KEY` / `GEMINI_BASE_URL` / `GEMINI_MODEL` | server | Google Gemini configuration. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI` / `GOOGLE_OAUTH_SCOPES` | server | OAuth client used for Gmail API with `gmail.send` scope. |
+| `TOKEN_ENCRYPTION_KEY` | server | 32-byte base64 key for encrypting Gmail OAuth tokens (generate with `openssl rand -base64 32`). |
+| `SENDGRID_API_KEY` | server | Optional fallback email provider key; leave unset to disable. |
+| `FROM_EMAIL` | server | Default sender address for transactional email. |
+| `APP_BASE_URL` | server | Public URL of the app (used in links inside emails). |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | client | Firebase Web API key exposed to the browser. |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | client | Firebase Auth domain for client SDK. |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | client | Firebase project ID shared with the client. |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | client | Firebase web app ID. |
+
+Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is resolved server-side via the typed env helpers in `src/config/env.ts`.
+
+### Firebase Emulator Usage
+
+- Copy `.env.example` to `.env.local` and populate values; the same service account can be reused for emulator runs.
+- Uncomment the `FIREBASE_AUTH_EMULATOR_HOST` and `FIRESTORE_EMULATOR_HOST` variables in `.env.local` when working with the Emulator Suite.
+- Keep `APP_BASE_URL` pointed at `http://localhost:3000` so generated links and OAuth redirects resolve locally.
+- The Gmail token crypto helper requires a stable `TOKEN_ENCRYPTION_KEY`; rotate this value in tandem with stored tokens if it changes.
+
 ## Implementation Roadmap
 
 - **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope.
