@@ -344,19 +344,21 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC1: Unauthenticated user sees Sign‑in; post sign‑in lands on Dashboard.
 * AC2: Session persists across refresh; sign‑out clears session.
 * AC3: Server routes reject unauthenticated requests with 401.
+* AC4: Protected routes redirect unauthenticated visitors to `/sign-in` and preserve the original destination.
 
 **Unit Tests**
 
 * UT1: Auth context provides `uid` when token present.
-* UT2: Middleware blocks request when no/invalid token.
+* UT2: Middleware blocks request when no/invalid token. (`tests/unit/middleware.test.ts`)
 
 **Integration Tests**
 
-* IT1: `GET /api/research` returns 401 when not signed in.
-* IT2: `GET /api/research` returns items for the signed‑in `uid`.
+* IT1: `GET /api/research` returns 401 when not signed in. (`tests/integration/api-research.test.ts`)
+* IT2: `GET /api/research` returns items for the signed‑in `uid`. (`tests/integration/api-research.test.ts`)
 
 **E2E Tests**
 
+* EE0: Visiting a protected route while unauthenticated redirects to Sign-in. (`tests/e2e/research.spec.ts`; executing `pnpm test:e2e` currently fails because the Next.js dev server cannot bundle `firebase-admin`'s `node:` imports. Investigate alternative bundler config in a follow-up.)
 * EE1: Sign‑in flow using Firebase emulator → lands on dashboard.
 * EE2: Sign‑out hides dashboard routes.
 
@@ -560,6 +562,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 **Test Execution Notes**
 
 * Initial `pnpm test:unit` run failed because Vitest lacked an alias for `@/`; fixed by updating `vitest.config.ts`/`vitest.integration.config.ts`, after which the suite passes.
+* Commit 3 introduces a typed Firestore data layer; repository unit tests (Vitest) validate state transitions & pagination, and integration coverage exercises `/api/research` create/list flows with middleware in place.
 
 ---
 
@@ -599,6 +602,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
 * **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).
+* **Dev Auth Bypass**: Local developers blocked on Firebase sign-in can export `DEV_AUTH_BYPASS=true` (with optional UID/email overrides) to have the middleware inject a stub user during `pnpm dev`; keep unset in production.
 
 ---
 
