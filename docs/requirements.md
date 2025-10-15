@@ -597,8 +597,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 ## 14) Implementation Notes (MVP)
 
-* **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction: `startSession()`, `submitAnswer()`, `execute()`, `poll()`.
-* **Gemini**: simple `generateContent` with `finalPrompt`. Normalize output.
+* **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction (`src/lib/providers/openaiDeepResearch.ts`) covering `startSession()`, `submitAnswer()`, `executeRun()`, `pollResult()` with retry/backoff.
+* **Gemini**: `generateContent` (`src/lib/providers/gemini.ts`) accepts the refined prompt, retries transient failures, and polls pending operations when necessary.
+* **Provider normalization**: Map provider responses into `ProviderResult` via `src/lib/providers/normalizers.ts` so downstream consumers have a consistent shape.
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
 * **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).
