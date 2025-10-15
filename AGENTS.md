@@ -16,5 +16,6 @@ These files define the product requirements, planned implementation sequence, an
 - When you deviate from the plan or discover new information, document the deviation in `commit-plan.md` (strike through the old expectation and append the new plan) and record requirement or architecture impacts in the other documents.
 - If any automated or manual tests fail, record the failure details and current status in the relevant sections of `commit-plan.md` and `requirements.md`.
 - Keep all documentation synchronized with the implementation state before you conclude your work.
+- After you finish coding and commit your work, ensure the following required status checks are green before merging to `main`: `lint`, `type-check`, `test:unit`, `test:integration`, and `test:e2e`.
 
 Thank you for keeping the project organized!

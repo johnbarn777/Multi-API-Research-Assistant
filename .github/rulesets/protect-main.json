@@ -1,0 +1,29 @@
+{
+  "name": "Require quality checks before merging to main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "lint" },
+          { "context": "type-check" },
+          { "context": "test:unit" },
+          { "context": "test:integration" },
+          { "context": "test:e2e" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}
