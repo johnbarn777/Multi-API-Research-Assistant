@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { middleware } from "../../middleware";
 import { GET, POST } from "../../app/api/research/route";
 import { GET as GET_BY_ID } from "../../app/api/research/[id]/route";
+import { POST as POST_ANSWER } from "../../app/api/research/[id]/openai/answer/route";
 import { AUTH_HEADER_UID, ForbiddenError } from "@/server/auth/session";
 import {
   type ResearchRepository,
   type PaginatedResearchResult,
   type CreateResearchInput,
+  type UpdateResearchInput,
   setResearchRepository
 } from "@/server/repositories/researchRepository";
 import type { Research } from "@/types/research";
@@ -20,7 +22,8 @@ const mockTokenVerifier = vi.hoisted(() => ({
 }));
 
 const mockOpenAiDeepResearch = vi.hoisted(() => ({
-  startSession: vi.fn()
+  startSession: vi.fn(),
+  submitAnswer: vi.fn()
 }));
 
 vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
@@ -28,6 +31,7 @@ vi.mock("@/lib/providers/openaiDeepResearch", () => mockOpenAiDeepResearch);
 
 const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 const startSession = mockOpenAiDeepResearch.startSession;
+const submitAnswer = mockOpenAiDeepResearch.submitAnswer;
 
 class InMemoryResearchRepository implements ResearchRepository {
   private store: Research[] = [];
@@ -74,8 +78,43 @@ class InMemoryResearchRepository implements ResearchRepository {
     return research;
   }
 
-  async update(): Promise<Research> {
-    throw new Error("Not implemented in in-memory repository");
+  async update(id: string, update: UpdateResearchInput, options?: { ownerUid?: string }): Promise<Research> {
+    const index = this.store.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new Error(`Research ${id} not found`);
+    }
+
+    const current = this.store[index];
+
+    if (options?.ownerUid && current.ownerUid !== options.ownerUid) {
+      throw new ForbiddenError("You do not have access to this research");
+    }
+
+    const next: Research = {
+      ...current,
+      title: update.title?.trim() ? update.title.trim() : current.title,
+      status: update.status ?? current.status,
+      dr: {
+        ...current.dr,
+        ...(update.dr ?? {}),
+        questions: update.dr?.questions ?? current.dr.questions,
+        answers: update.dr?.answers ?? current.dr.answers
+      },
+      gemini: {
+        ...current.gemini,
+        ...(update.gemini ?? {}),
+        questions: update.gemini?.questions ?? current.gemini.questions,
+        answers: update.gemini?.answers ?? current.gemini.answers
+      },
+      report: {
+        ...current.report,
+        ...(update.report ?? {})
+      },
+      updatedAt: this.nextTimestamp()
+    };
+
+    this.store[index] = next;
+    return next;
   }
 
   async getById(id: string, options?: { ownerUid?: string }): Promise<Research | null> {
@@ -215,6 +254,18 @@ function createApp() {
     await applyNextResponse(res, response);
   });
 
+  app.post("/api/research/:id/openai/answer", async (req, res) => {
+    const url = new URL(req.originalUrl || req.url, `http://${req.headers.host ?? "localhost"}`);
+    const nextReq = new NextRequest(url, {
+      method: "POST",
+      headers: headersFromNode(req.headers as Record<string, string | string[]>),
+      body: JSON.stringify(req.body ?? {})
+    });
+
+    const response = await POST_ANSWER(nextReq, { params: { id: req.params.id } });
+    await applyNextResponse(res, response);
+  });
+
   return app;
 }
 
@@ -224,6 +275,7 @@ describe("API /api/research", () => {
   beforeEach(() => {
     verifyFirebaseIdToken.mockReset();
     startSession.mockReset();
+    submitAnswer.mockReset();
     repository = new InMemoryResearchRepository();
     setResearchRepository(repository);
   });
@@ -380,6 +432,102 @@ describe("API /api/research", () => {
       .get(`/api/research/${created.id}`)
       .set("Authorization", "Bearer valid-token")
       .expect(403);
+  });
+
+  it("stores an answer and appends the next question", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+    submitAnswer.mockResolvedValue({
+      nextQuestion: { index: 2, text: "Follow-up?" },
+      finalPrompt: null,
+      raw: {}
+    });
+
+    const research = await repository.create({
+      ownerUid: "test-user",
+      title: "Topic",
+      status: "refining",
+      dr: {
+        sessionId: "session-123",
+        questions: [{ index: 1, text: "First question?" }],
+        answers: []
+      }
+    });
+
+    const app = createApp();
+
+    const response = await request(app)
+      .post(`/api/research/${research.id}/openai/answer`)
+      .set("Authorization", "Bearer valid-token")
+      .send({ answer: "First answer", questionIndex: 1 })
+      .expect(200);
+
+    expect(submitAnswer).toHaveBeenCalledWith({
+      sessionId: "session-123",
+      answer: "First answer"
+    });
+
+    expect(response.body.nextQuestion).toEqual({ index: 2, text: "Follow-up?" });
+    expect(response.body.finalPrompt).toBeNull();
+    expect(response.body.item.dr.answers).toEqual([{ index: 1, answer: "First answer" }]);
+    expect(response.body.item.dr.questions).toEqual([
+      { index: 1, text: "First question?" },
+      { index: 2, text: "Follow-up?" }
+    ]);
+
+    const stored = await repository.getById(research.id);
+    expect(stored?.dr.answers).toEqual([{ index: 1, answer: "First answer" }]);
+    expect(stored?.dr.questions).toHaveLength(2);
+    expect(stored?.status).toBe("refining");
+  });
+
+  it("records the final prompt and transitions status to ready_to_run", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+    submitAnswer.mockResolvedValue({
+      nextQuestion: null,
+      finalPrompt: "Deep dive on sustainable energy adoption barriers",
+      raw: {}
+    });
+
+    const research = await repository.create({
+      ownerUid: "test-user",
+      title: "Topic",
+      status: "refining",
+      dr: {
+        sessionId: "session-abc",
+        questions: [{ index: 1, text: "Primary question?" }],
+        answers: [{ index: 1, answer: "First answer" }]
+      }
+    });
+
+    const app = createApp();
+
+    const response = await request(app)
+      .post(`/api/research/${research.id}/openai/answer`)
+      .set("Authorization", "Bearer valid-token")
+      .send({ answer: "Final clarification", questionIndex: 1 })
+      .expect(200);
+
+    expect(submitAnswer).toHaveBeenCalledWith({
+      sessionId: "session-abc",
+      answer: "Final clarification"
+    });
+
+    expect(response.body.finalPrompt).toBe(
+      "Deep dive on sustainable energy adoption barriers"
+    );
+    expect(response.body.item.status).toBe("ready_to_run");
+
+    const stored = await repository.getById(research.id);
+    expect(stored?.dr.finalPrompt).toBe(
+      "Deep dive on sustainable energy adoption barriers"
+    );
+    expect(stored?.status).toBe("ready_to_run");
   });
 });
 

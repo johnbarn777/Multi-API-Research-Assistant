@@ -427,6 +427,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * **Pass:** Final prompt persisted and visible; back/next works.
 * **Fail:** Lost answers on navigation; status not updated.
 
+_Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, appends follow-up questions, and transitions research to `ready_to_run` once the final prompt lands. Client `RefinementQA` retains local drafts across navigation. Verified via `pnpm test:unit`, `pnpm test:integration`, and `pnpm test:e2e --project=chromium`._
+
 ---
 
 #### FR-4 Execute Providers in Parallel (OpenAI & Gemini)

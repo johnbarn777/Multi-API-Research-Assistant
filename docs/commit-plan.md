@@ -83,15 +83,15 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 6: Refinement loop API + client components
 
 **Implementation Steps**
-- Implement `/api/research/[id]/openai/answer` route handling question submission, storing answers, and detecting final prompt transitions.
-- Add server action/helper for fetching next question state for UI hydration.
-- Build `RefinementQA` component (in `src/components/research/RefinementQA.tsx`) with back/next controls, textarea, and progress indicator.
-- Update `app/research/[id]/page.tsx` to render refinement stepper when status is `awaiting_refinements` or `refining`, persisting local answers until saved.
+- ~~Implement `/api/research/[id]/openai/answer` route handling question submission, storing answers, and detecting final prompt transitions.~~
+- ~~Add server action/helper for fetching next question state for UI hydration.~~
+- ~~Build `RefinementQA` component (in `src/components/research/RefinementQA.tsx`) with back/next controls, textarea, and progress indicator.~~
+- ~~Update `app/research/[id]/page.tsx` to render refinement stepper when status is `awaiting_refinements` or `refining`, persisting local answers until saved.~~
 
 **Testing**
-- Unit: Reducer/component logic tests (Vitest + React Testing Library) ensuring navigation retains answers and disables submit until text present.
-- Integration: Supertest for answer route (mocking provider) verifying Firestore updates and final prompt status change.
-- E2E: Playwright scenario completing multi-question refinement and seeing “Ready to Run” state.
+- ~~Unit: Reducer/component logic tests (Vitest + React Testing Library) ensuring navigation retains answers and disables submit until text present.~~ (`pnpm test:unit`)
+- ~~Integration: Supertest for answer route (mocking provider) verifying Firestore updates and final prompt status change.~~ (`pnpm test:integration`)
+- ~~E2E: Playwright scenario completing multi-question refinement and seeing “Ready to Run” state.~~ (`pnpm test:e2e --project=chromium`)
 
 ## Commit 7: Parallel provider execution orchestration
 
