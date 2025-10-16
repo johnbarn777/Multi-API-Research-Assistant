@@ -96,15 +96,17 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 7: Parallel provider execution orchestration
 
 **Implementation Steps**
-- Add `/api/research/[id]/run` route that transitions status to `running`, triggers OpenAI execute + Gemini generate in parallel (Promise.allSettled) using background tasks (Next.js route handler async).
-- Implement polling/backoff helpers to update Firestore with intermediate provider status, durations, errors.
-- Update research detail page with `ProviderProgress` component showing state of each provider with streaming updates (e.g., via polling or SWR revalidation).
-- Ensure state machine allows partial success and records failure reasons.
+- ~~Add `/api/research/[id]/run` route that transitions status to `running`, triggers OpenAI execute + Gemini generate in parallel (Promise.allSettled) using background tasks (Next.js route handler async).~~
+- ~~Implement polling/backoff helpers to update Firestore with intermediate provider status, durations, errors.~~
+- ~~Update research detail page with `ProviderProgress` component showing state of each provider with streaming updates (e.g., via polling or SWR revalidation).~~
+- ~~Ensure state machine allows partial success and records failure reasons.~~
 
 **Testing**
-- Unit: Tests for orchestration helper ensuring retries, partial failure handling, and status transitions.
-- Integration: Supertest hitting `/run` with mocked providers returning success and failure; assert Firestore updates and final state.
-- E2E: Playwright test clicking “Run” and observing both provider cards progress to completion.
+- ~~Unit: Tests for orchestration helper ensuring retries, partial failure handling, and status transitions.~~ (`tests/unit/researchRun.test.ts`)
+- ~~Integration: Supertest hitting `/run` with mocked providers returning success and failure; assert Firestore updates and final state.~~ (`tests/integration/api-research.test.ts`)
+- ~~E2E: Playwright test clicking “Run” and observing both provider cards progress to completion.~~ (`tests/e2e/research.spec.ts`)
+
+> **Note:** `pnpm test:e2e` still expects valid Firebase Admin credentials (project id + service account). Local runs without these secrets will fail while booting the Next.js dev server; supply the real keys when executing the suite.
 
 ## Commit 8: PDF generation service
 

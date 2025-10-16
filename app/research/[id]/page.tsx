@@ -12,6 +12,7 @@ import {
   type Question
 } from "./state";
 import { RefinementQA } from "@/components/research/RefinementQA";
+import { ProviderProgress } from "@/components/research/ProviderProgress";
 import { useResearchDetail } from "@/hooks/useResearchDetail";
 import { useAuth } from "@/lib/firebase/auth-context";
 import type { ResearchItem } from "@/lib/api/researchClient";
@@ -20,6 +21,11 @@ type AnswerResponse = {
   item: ResearchItem;
   nextQuestion: Question | null;
   finalPrompt: string | null;
+};
+
+type RunResponse = {
+  item: ResearchItem;
+  alreadyRunning?: boolean;
 };
 
 function formatStatus(status: ResearchItem["status"] | undefined) {
@@ -46,6 +52,9 @@ export default function ResearchDetailPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [isStartingRun, setIsStartingRun] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runSuccess, setRunSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!researchId) {
@@ -120,6 +129,15 @@ export default function ResearchDetailPage() {
     return () => clearTimeout(timer);
   }, [submitSuccess]);
 
+  useEffect(() => {
+    if (!runSuccess) {
+      return;
+    }
+
+    const timer = setTimeout(() => setRunSuccess(null), 2500);
+    return () => clearTimeout(timer);
+  }, [runSuccess]);
+
   const currentQuestion = useMemo(
     () => (questions.length > 0 ? questions[currentIndex] ?? null : null),
     [questions, currentIndex]
@@ -138,6 +156,24 @@ export default function ResearchDetailPage() {
   const helperText = submitError ?? submitSuccess ?? null;
   const canGoBack = currentIndex > 0;
   const canGoNext = currentIndex < questions.length - 1;
+  const canStartRun = research?.status === "ready_to_run";
+  const isRunInProgress = research?.status === "running";
+  const runHelperText = runError ?? runSuccess ?? null;
+  const runStatusMeta = (() => {
+    switch (research?.status) {
+      case "running":
+        return { label: "Running", className: "border-amber-400 text-amber-200" };
+      case "completed":
+        return { label: "Completed", className: "border-emerald-400 text-emerald-200" };
+      case "failed":
+        return { label: "Failed", className: "border-rose-400 text-rose-200" };
+      case "ready_to_run":
+        return { label: "Ready", className: "border-emerald-300 text-emerald-100" };
+      default:
+        return { label: "Pending", className: "border-slate-600 text-slate-300" };
+    }
+  })();
+  const runButtonDisabled = !canStartRun || isStartingRun;
 
   const handleAnswerChange = (value: string) => {
     if (!currentQuestion) {
@@ -242,6 +278,51 @@ export default function ResearchDetailPage() {
     }
   };
 
+  const handleStartRun = async () => {
+    if (!researchId) {
+      return;
+    }
+
+    setIsStartingRun(true);
+    setRunError(null);
+    setRunSuccess(null);
+
+    try {
+      const headers: HeadersInit = {
+        "Content-Type": "application/json"
+      };
+
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `/api/research/${encodeURIComponent(researchId)}/run`,
+        {
+          method: "POST",
+          headers
+        }
+      );
+
+      const body = (await response.json().catch(() => null)) as RunResponse | { error?: string };
+
+      if (!response.ok || !body || !("item" in body)) {
+        const message =
+          body && typeof body === "object" && "error" in body && body.error
+            ? body.error
+            : "Failed to start provider execution";
+        throw new Error(message);
+      }
+
+      mutate({ item: body.item }, false);
+      setRunSuccess(body.alreadyRunning ? "Run already in progress" : "Provider execution started");
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Failed to start provider execution");
+    } finally {
+      setIsStartingRun(false);
+    }
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-10 px-6 py-12">
       <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -320,9 +401,29 @@ export default function ResearchDetailPage() {
                 This prompt will be used for OpenAI Deep Research and Gemini when you start the run.
               </p>
             </div>
-            <span className="rounded-full border border-emerald-300 px-3 py-1 text-xs uppercase text-emerald-100">
-              Ready to run
-            </span>
+            <div className="flex flex-col items-start gap-2 sm:items-end">
+              <span className={`rounded-full border px-3 py-1 text-xs uppercase ${runStatusMeta.className}`}>
+                {runStatusMeta.label}
+              </span>
+              {canStartRun ? (
+                <button
+                  type="button"
+                  className="rounded-md bg-emerald-500 px-4 py-2 text-sm font-medium text-emerald-50 transition hover:bg-emerald-500/90 disabled:cursor-not-allowed disabled:bg-emerald-500/50"
+                  onClick={handleStartRun}
+                  disabled={runButtonDisabled}
+                >
+                  {isStartingRun ? "Starting..." : "Run providers"}
+                </button>
+              ) : null}
+              {isRunInProgress ? (
+                <p className="text-xs text-amber-200">
+                  Providers are running. This view refreshes automatically with new progress.
+                </p>
+              ) : null}
+              {runHelperText ? (
+                <p className={`text-xs ${runError ? "text-rose-200" : "text-emerald-200"}`}>{runHelperText}</p>
+              ) : null}
+            </div>
           </header>
           <pre className="max-h-64 overflow-auto rounded-md bg-slate-950/60 px-4 py-3 text-sm text-emerald-100">
             {finalPrompt}
@@ -331,29 +432,8 @@ export default function ResearchDetailPage() {
       ) : null}
 
       <section className="grid gap-6 md:grid-cols-2">
-        <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-900/40 p-6">
-          <header className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">OpenAI Deep Research</h2>
-            <span className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase text-slate-300">
-              {finalPrompt ? "Ready" : "Pending"}
-            </span>
-          </header>
-          <p className="text-sm text-slate-400">
-            Execution progress, polling status, and summarized results will appear here once the run is
-            initiated.
-          </p>
-        </article>
-        <article className="space-y-4 rounded-lg border border-slate-800 bg-slate-900/40 p-6">
-          <header className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-white">Google Gemini</h2>
-            <span className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase text-slate-300">
-              {finalPrompt ? "Ready" : "Pending"}
-            </span>
-          </header>
-          <p className="text-sm text-slate-400">
-            Gemini execution results will be surfaced here once refinement completes and the run is started.
-          </p>
-        </article>
+        <ProviderProgress provider="openai" state={research?.dr} />
+        <ProviderProgress provider="gemini" state={research?.gemini} />
       </section>
 
       <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-6">

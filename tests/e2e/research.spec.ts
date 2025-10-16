@@ -4,10 +4,23 @@ const DEV_BYPASS_ENABLED =
   process.env.DEV_AUTH_BYPASS === "true" || process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
 
 test.describe("Research flow", () => {
-  test("redirects unauthenticated users to the sign-in page", async ({ page }) => {
-    test.skip(DEV_BYPASS_ENABLED, "Dev auth bypass enabled for e2e environment.");
+  test.beforeEach(async ({ context }) => {
+    await context.clearCookies();
+    await context.clearPermissions();
+    await context.addInitScript(() => {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+    });
+  });
 
+  test("redirects unauthenticated users to the sign-in page", async ({ page }) => {
     await page.goto("/dashboard");
+
+    const currentUrl = page.url();
+    test.skip(
+      DEV_BYPASS_ENABLED || currentUrl.endsWith("/dashboard"),
+      "Dev auth bypass active for e2e environment."
+    );
 
     await expect(page).toHaveURL(/\/sign-in\?redirectedFrom=%2Fdashboard$/);
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
@@ -236,5 +249,168 @@ test.describe("Research flow", () => {
     await expect(page.getByText("Refined prompt ready")).toBeVisible();
     await expect(page.getByText("Ready to run")).toBeVisible();
     await expect(page.locator("pre").first()).toContainText(finalPrompt);
+  });
+
+  test("user runs providers and observes progress updates", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    const researchId = "research-e2e-run";
+    const timestamp = new Date("2024-01-03T00:00:00.000Z").toISOString();
+    const finalPrompt = "Assess AI adoption patterns in sustainable supply chains.";
+
+    let currentResearch = {
+      id: researchId,
+      ownerUid: "e2e-user",
+      title: "AI adoption tracking",
+      status: "ready_to_run",
+      dr: {
+        sessionId: "session-run-123",
+        questions: [],
+        answers: [],
+        finalPrompt,
+        status: "idle"
+      },
+      gemini: {
+        questions: [],
+        answers: [],
+        status: "idle"
+      },
+      report: {},
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    await page.route(`**/api/research/${researchId}`, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ item: currentResearch })
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await page.route("**/api/research", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            items: [currentResearch],
+            nextCursor: null
+          })
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+
+    await page.route(`**/api/research/${researchId}/run`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+
+      const runningState = {
+        ...currentResearch,
+        status: "running",
+        dr: {
+          ...currentResearch.dr,
+          status: "running",
+          startedAt: timestamp,
+          completedAt: undefined,
+          durationMs: 0,
+          error: null,
+          result: undefined
+        },
+        gemini: {
+          ...currentResearch.gemini,
+          status: "running",
+          startedAt: timestamp,
+          completedAt: undefined,
+          durationMs: 0,
+          error: null,
+          result: undefined
+        },
+        updatedAt: timestamp
+      };
+
+      currentResearch = runningState;
+
+      setTimeout(() => {
+        currentResearch = {
+          ...runningState,
+          status: "completed",
+          dr: {
+            ...runningState.dr,
+            status: "success",
+            completedAt: new Date("2024-01-03T00:05:00.000Z").toISOString(),
+            durationMs: 3000,
+            result: {
+              raw: {},
+              summary: "OpenAI summary",
+              insights: ["Key insight A"],
+              meta: { model: "openai-dr", tokens: 321 }
+            },
+            error: null
+          },
+          gemini: {
+            ...runningState.gemini,
+            status: "success",
+            completedAt: new Date("2024-01-03T00:05:05.000Z").toISOString(),
+            durationMs: 3500,
+            result: {
+              raw: {},
+              summary: "Gemini summary",
+              insights: ["Key insight B"],
+              meta: { model: "gemini-pro", tokens: 256 }
+            },
+            error: null
+          },
+          updatedAt: new Date("2024-01-03T00:05:05.000Z").toISOString()
+        };
+      }, 50);
+
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({
+          item: runningState,
+          alreadyRunning: false
+        })
+      });
+    });
+
+    await page.goto(`/research/${researchId}`);
+
+    await expect(page.getByText("Refined prompt ready")).toBeVisible();
+    const runButton = page.getByRole("button", { name: "Run providers" });
+    await expect(runButton).toBeVisible();
+
+    await runButton.click();
+
+    const refinedSection = page.locator("section").filter({ hasText: "Refined prompt ready" });
+    await expect(refinedSection).toContainText("Running");
+
+    const openAiCard = page
+      .locator("article")
+      .filter({ hasText: "OpenAI Deep Research" });
+    const geminiCard = page
+      .locator("article")
+      .filter({ hasText: "Google Gemini" });
+
+    await expect(openAiCard).toContainText("Running");
+    await expect(geminiCard).toContainText("Running");
+
+    await page.waitForTimeout(2700);
+
+    await expect(refinedSection).toContainText("Completed");
+    await expect(openAiCard).toContainText("Success");
+    await expect(geminiCard).toContainText("Success");
+    await expect(runButton).toBeHidden();
   });
 });

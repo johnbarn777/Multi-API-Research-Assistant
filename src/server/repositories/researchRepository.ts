@@ -195,14 +195,16 @@ export class FirestoreResearchRepository implements ResearchRepository {
       dr: mergeProviderState(
         {
           questions: [],
-          answers: []
+          answers: [],
+          status: "idle"
         },
         input.dr
       ),
       gemini: mergeProviderState(
         {
           questions: [],
-          answers: []
+          answers: [],
+          status: "idle"
         },
         input.gemini
       ),
@@ -223,39 +225,61 @@ export class FirestoreResearchRepository implements ResearchRepository {
     options?: { ownerUid?: string }
   ): Promise<Research> {
     const docRef = this.collection.doc(id);
-    const snapshot = await docRef.get();
+    const firestore = (this.collection as CollectionReference<Research> & {
+      firestore?: { runTransaction?: typeof docRef.firestore.runTransaction };
+    }).firestore;
 
-    if (!snapshot.exists) {
-      throw new ResearchNotFoundError(id);
-    }
+    const buildNext = (current: Research): Research => {
+      if (options?.ownerUid && current.ownerUid !== options.ownerUid) {
+        throw new ForbiddenError("You do not have access to this research");
+      }
 
-    const current = snapshot.data()!;
+      if (update.status) {
+        assertValidTransition(current.status, update.status);
+      }
 
-    if (options?.ownerUid && current.ownerUid !== options.ownerUid) {
-      throw new ForbiddenError("You do not have access to this research");
-    }
+      const now = this.now();
 
-    if (update.status) {
-      assertValidTransition(current.status, update.status);
-    }
-
-    const now = this.now();
-
-    const next: Research = {
-      ...current,
-      title: update.title?.trim() ? update.title.trim() : current.title,
-      status: update.status ?? current.status,
-      dr: mergeProviderState(current.dr, update.dr),
-      gemini: mergeProviderState(current.gemini, update.gemini),
-      report: {
-        ...current.report,
-        ...(update.report ?? {})
-      },
-      updatedAt: now
+      return {
+        ...current,
+        title: update.title?.trim() ? update.title.trim() : current.title,
+        status: update.status ?? current.status,
+        dr: mergeProviderState(current.dr, update.dr),
+        gemini: mergeProviderState(current.gemini, update.gemini),
+        report: {
+          ...current.report,
+          ...(update.report ?? {})
+        },
+        updatedAt: now
+      };
     };
 
-    await docRef.set(next, { merge: false });
-    return next;
+    if (!firestore || typeof firestore.runTransaction !== "function") {
+      const snapshot = await docRef.get();
+
+      if (!snapshot.exists) {
+        throw new ResearchNotFoundError(id);
+      }
+
+      const current = snapshot.data()!;
+      const next = buildNext(current);
+      await docRef.set(next, { merge: false });
+      return next;
+    }
+
+    return await firestore.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(docRef);
+
+      if (!snapshot.exists) {
+        throw new ResearchNotFoundError(id);
+      }
+
+      const current = snapshot.data()!;
+      const next = buildNext(current);
+
+      transaction.set(docRef, next, { merge: false });
+      return next;
+    });
   }
 
   async getById(

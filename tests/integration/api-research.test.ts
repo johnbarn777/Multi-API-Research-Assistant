@@ -6,6 +6,7 @@ import { middleware } from "../../middleware";
 import { GET, POST } from "../../app/api/research/route";
 import { GET as GET_BY_ID } from "../../app/api/research/[id]/route";
 import { POST as POST_ANSWER } from "../../app/api/research/[id]/openai/answer/route";
+import { POST as POST_RUN } from "../../app/api/research/[id]/run/route";
 import { AUTH_HEADER_UID, ForbiddenError } from "@/server/auth/session";
 import {
   type ResearchRepository,
@@ -14,7 +15,7 @@ import {
   type UpdateResearchInput,
   setResearchRepository
 } from "@/server/repositories/researchRepository";
-import type { Research } from "@/types/research";
+import type { Research, ResearchProviderState } from "@/types/research";
 import { Timestamp } from "firebase-admin/firestore";
 
 const mockTokenVerifier = vi.hoisted(() => ({
@@ -23,15 +24,59 @@ const mockTokenVerifier = vi.hoisted(() => ({
 
 const mockOpenAiDeepResearch = vi.hoisted(() => ({
   startSession: vi.fn(),
-  submitAnswer: vi.fn()
+  submitAnswer: vi.fn(),
+  executeRun: vi.fn(),
+  pollResult: vi.fn()
 }));
 
-vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
-vi.mock("@/lib/providers/openaiDeepResearch", () => mockOpenAiDeepResearch);
+const mockGemini = vi.hoisted(() => ({
+  generateContent: vi.fn()
+}));
 
 const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 const startSession = mockOpenAiDeepResearch.startSession;
 const submitAnswer = mockOpenAiDeepResearch.submitAnswer;
+const executeRun = mockOpenAiDeepResearch.executeRun;
+const pollResult = mockOpenAiDeepResearch.pollResult;
+const generateContent = mockGemini.generateContent;
+
+vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
+vi.mock("@/lib/providers/openaiDeepResearch", () => mockOpenAiDeepResearch);
+vi.mock("@/lib/providers/gemini", () => mockGemini);
+
+function mergeProviderState(
+  current: ResearchProviderState,
+  patch?: ResearchProviderState
+): ResearchProviderState {
+  if (!patch) {
+    return {
+      ...current,
+      questions: [...(current.questions ?? [])],
+      answers: [...(current.answers ?? [])]
+    };
+  }
+
+  return {
+    ...current,
+    ...patch,
+    questions:
+      patch.questions !== undefined
+        ? [...patch.questions]
+        : [...(current.questions ?? [])],
+    answers:
+      patch.answers !== undefined
+        ? [...patch.answers]
+        : [...(current.answers ?? [])]
+  };
+}
+
+function defaultProviderState(): ResearchProviderState {
+  return {
+    questions: [],
+    answers: [],
+    status: "idle"
+  };
+}
 
 class InMemoryResearchRepository implements ResearchRepository {
   private store: Research[] = [];
@@ -67,8 +112,8 @@ class InMemoryResearchRepository implements ResearchRepository {
       ownerUid: input.ownerUid,
       title: input.title.trim(),
       status: input.status ?? "awaiting_refinements",
-      dr: input.dr ?? { questions: [], answers: [] },
-      gemini: input.gemini ?? { questions: [], answers: [] },
+      dr: mergeProviderState(defaultProviderState(), input.dr),
+      gemini: mergeProviderState(defaultProviderState(), input.gemini),
       report: input.report ?? {},
       createdAt: now,
       updatedAt: now
@@ -94,18 +139,8 @@ class InMemoryResearchRepository implements ResearchRepository {
       ...current,
       title: update.title?.trim() ? update.title.trim() : current.title,
       status: update.status ?? current.status,
-      dr: {
-        ...current.dr,
-        ...(update.dr ?? {}),
-        questions: update.dr?.questions ?? current.dr.questions,
-        answers: update.dr?.answers ?? current.dr.answers
-      },
-      gemini: {
-        ...current.gemini,
-        ...(update.gemini ?? {}),
-        questions: update.gemini?.questions ?? current.gemini.questions,
-        answers: update.gemini?.answers ?? current.gemini.answers
-      },
+      dr: mergeProviderState(current.dr, update.dr),
+      gemini: mergeProviderState(current.gemini, update.gemini),
       report: {
         ...current.report,
         ...(update.report ?? {})
@@ -266,6 +301,18 @@ function createApp() {
     await applyNextResponse(res, response);
   });
 
+  app.post("/api/research/:id/run", async (req, res) => {
+    const url = new URL(req.originalUrl || req.url, `http://${req.headers.host ?? "localhost"}`);
+    const nextReq = new NextRequest(url, {
+      method: "POST",
+      headers: headersFromNode(req.headers as Record<string, string | string[]>),
+      body: JSON.stringify(req.body ?? {})
+    });
+
+    const response = await POST_RUN(nextReq, { params: { id: req.params.id } });
+    await applyNextResponse(res, response);
+  });
+
   return app;
 }
 
@@ -276,6 +323,9 @@ describe("API /api/research", () => {
     verifyFirebaseIdToken.mockReset();
     startSession.mockReset();
     submitAnswer.mockReset();
+    executeRun.mockReset();
+    pollResult.mockReset();
+    generateContent.mockReset();
     repository = new InMemoryResearchRepository();
     setResearchRepository(repository);
   });
@@ -528,6 +578,153 @@ describe("API /api/research", () => {
       "Deep dive on sustainable energy adoption barriers"
     );
     expect(stored?.status).toBe("ready_to_run");
+  });
+
+  it("starts provider execution and persists successful results", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+
+    executeRun.mockResolvedValue({
+      runId: "run-123",
+      status: "queued",
+      raw: {}
+    });
+    pollResult.mockResolvedValue({
+      status: "completed",
+      result: {
+        raw: {},
+        summary: "OpenAI result",
+        insights: [],
+        meta: {}
+      },
+      raw: {}
+    });
+    generateContent.mockResolvedValue({
+      raw: {},
+      summary: "Gemini result",
+      insights: [],
+      meta: {}
+    });
+
+    const research = await repository.create({
+      ownerUid: "test-user",
+      title: "Topic",
+      status: "ready_to_run",
+      dr: {
+        sessionId: "session-123",
+        finalPrompt: "Refined prompt",
+        status: "idle"
+      }
+    });
+
+    const app = createApp();
+
+    const response = await request(app)
+      .post(`/api/research/${research.id}/run`)
+      .set("Authorization", "Bearer valid-token")
+      .expect(202);
+
+    expect(response.body.alreadyRunning).toBe(false);
+    expect(response.body.item.status).toBe("running");
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const stored = await repository.getById(research.id);
+    expect(stored?.status).toBe("completed");
+    expect(stored?.dr.status).toBe("success");
+    expect(stored?.gemini.status).toBe("success");
+  });
+
+  it("marks research as completed when only OpenAI succeeds", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+
+    executeRun.mockResolvedValue({
+      runId: "run-456",
+      status: "queued",
+      raw: {}
+    });
+    pollResult.mockResolvedValue({
+      status: "completed",
+      result: {
+        raw: {},
+        summary: "OpenAI summary",
+        insights: [],
+        meta: {}
+      },
+      raw: {}
+    });
+    generateContent.mockRejectedValue(new Error("Gemini outage"));
+
+    const research = await repository.create({
+      ownerUid: "test-user",
+      title: "Topic",
+      status: "ready_to_run",
+      dr: {
+        sessionId: "session-123",
+        finalPrompt: "Prompt",
+        status: "idle"
+      }
+    });
+
+    const app = createApp();
+
+    await request(app)
+      .post(`/api/research/${research.id}/run`)
+      .set("Authorization", "Bearer valid-token")
+      .expect(202);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const stored = await repository.getById(research.id);
+    expect(stored?.status).toBe("completed");
+    expect(stored?.dr.status).toBe("success");
+    expect(stored?.gemini.status).toBe("failure");
+    expect(stored?.gemini.error).toMatch(/Gemini outage/);
+  });
+
+  it("marks research as failed when both providers fail", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+
+    executeRun.mockResolvedValue({
+      runId: "run-789",
+      status: "queued",
+      raw: {}
+    });
+    pollResult.mockRejectedValue(new Error("OpenAI failure"));
+    generateContent.mockRejectedValue(new Error("Gemini failure"));
+
+    const research = await repository.create({
+      ownerUid: "test-user",
+      title: "Topic",
+      status: "ready_to_run",
+      dr: {
+        sessionId: "session-123",
+        finalPrompt: "Prompt",
+        status: "idle"
+      }
+    });
+
+    const app = createApp();
+
+    await request(app)
+      .post(`/api/research/${research.id}/run`)
+      .set("Authorization", "Bearer valid-token")
+      .expect(202);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const stored = await repository.getById(research.id);
+    expect(stored?.status).toBe("failed");
+    expect(stored?.dr.status).toBe("failure");
+    expect(stored?.gemini.status).toBe("failure");
   });
 });
 

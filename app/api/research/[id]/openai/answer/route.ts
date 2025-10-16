@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { ensureAuthenticated } from "@/server/auth/session";
 import { submitRefinementAnswer } from "@/server/research/refinement";
-import { serializeResearch } from "../../../serialize";
+import { serializeResearch } from "@/server/serializers/research";
 import { logger } from "@/lib/utils/logger";
 
 type Params = {

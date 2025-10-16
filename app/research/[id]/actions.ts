@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { requireAuth } from "@/server/auth/session";
 import { getRefinementHydrationState } from "@/server/research/refinement";
-import { serializeResearch } from "@/app/api/research/serialize";
+import { serializeResearch } from "@/server/serializers/research";
 
 export async function hydrateRefinementState(researchId: string, currentIndex = 0) {
   const session = requireAuth(headers());

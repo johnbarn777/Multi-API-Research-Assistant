@@ -5,7 +5,7 @@
 1. **Authentication** – User signs in with Google via Firebase Auth. Middleware attaches the Firebase UID to every server request.
 2. **Research Creation** – Client calls `/api/research` to create a Firestore document (defaults to `awaiting_refinements`, immediately transitions to `refining` when the provider returns questions) and start the OpenAI Deep Research session.
 3. **Refinement Loop** – UI surfaces one question at a time. Answers are posted to `/api/research/:id/openai/answer`, which now persists `{index, answer}` pairs, appends provider follow-ups, and transitions the research to `ready_to_run` once `finalPrompt` arrives. The client uses `hydrateRefinementState` (server action) plus the `RefinementQA` component to retain local drafts across navigation while the state machine advances.
-4. **Parallel Execution** – `/api/research/:id/run` triggers OpenAI Deep Research execution and Gemini generation concurrently. Polling keeps Firestore updated.
+4. **Parallel Execution** – `/api/research/:id/run` (`scheduleResearchRun`) transitions the doc to `running`, then kicks off OpenAI Deep Research and Gemini in parallel using `Promise.all`. Each provider sets its own `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as it settles so partial success is recorded. The research status flips to `completed` when at least one provider succeeds; otherwise it becomes `failed`.
 5. **Finalization** – `/api/research/:id/finalize` assembles a PDF report, attempts Gmail delivery (SendGrid fallback), updates `report.emailStatus`, and marks the research as completed.
 
 ## Directory Responsibilities
@@ -44,7 +44,7 @@
 - Dashboard and creation flows use SWR with the Firebase ID token in the cache key so per-user data remains isolated.
 - `useResearchList` provides the paginated list (default page size 20) and exposes `mutate` for optimistic updates.
 - Creating a research session calls `createResearch` helper, then prepends the returned item to the SWR cache before revalidating in the background.
-- Research detail views rely on `useResearchDetail`, fetching `/api/research/:id` to surface the latest refinement questions immediately after creation.
+- Research detail views rely on `useResearchDetail`, fetching `/api/research/:id` to surface the latest refinement questions immediately after creation. The hook now refreshes every ~2.5s while a run is `running` so provider progress badges update without a manual reload.
 - Errors from `/api/research` surface through a shared `ApiError` class so UI components can render consistent messaging.
 
 ## Deployment Considerations
@@ -53,7 +53,7 @@
 - **Node runtime** (Vercel Serverless Function) for provider calls, PDF generation, and email sending.
 - **Secrets** via Vercel environment variables. Gmail OAuth tokens should be encrypted (see `TOKEN_ENCRYPTION_KEY`).
 - Environment helpers (`getServerEnv` / `getPublicEnv`) ensure server secrets stay off the client bundle while still validating configuration with Zod.
-- **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
+- **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC, __name__ DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
 - **Firestore Rules** – `firestore.rules` locks access to authenticated users’ own `users/{uid}` and `research/{id}` documents; deployed with the CLI alongside indexes on 2025-10-15.
 - **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
 

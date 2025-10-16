@@ -101,17 +101,26 @@ Sequence (happy path):
 * `dr`: {
 
   * `sessionId?: string`,
+  * `jobId?: string`,
   * `questions: Array<{ index: number, text: string }>`,
   * `answers: Array<{ index: number, answer: string }>`,
   * `finalPrompt?: string`,
+  * `status?: "idle" | "queued" | "running" | "success" | "failure"`,
   * `result?: ProviderResult`,
-  * `durationMs?: number`
+  * `durationMs?: number`,
+  * `startedAt?: string`,
+  * `completedAt?: string`,
+  * `error?: string | null`
     }
 * `gemini`: {
 
   * `jobId?: string`,
+  * `status?: "idle" | "queued" | "running" | "success" | "failure"`,
   * `result?: ProviderResult`,
-  * `durationMs?: number`
+  * `durationMs?: number`,
+  * `startedAt?: string`,
+  * `completedAt?: string`,
+  * `error?: string | null`
     }
 * `report`: {
 
@@ -136,7 +145,7 @@ interface ProviderResult {
 
 **Indexes**
 
-* `research` composite index: `ownerUid ASC, createdAt DESC`
+* `research` composite index: `ownerUid ASC, createdAt DESC, __name__ DESC`
 
 ---
 
@@ -226,7 +235,7 @@ Query: `?cursor=<ts|docId>`
 
 ### 7.5 `POST /api/research/:id/run`
 
-**Resp:** `{ ok: true }` → asynchronous progression to `completed`.
+**Resp:** `{ item: Research, alreadyRunning?: boolean }` → transitions research to `running` and triggers OpenAI + Gemini execution in background (`Promise.allSettled`). Firestore updates each provider’s `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as runs settle (supports partial success).
 
 ### 7.6 `POST /api/research/:id/finalize`
 
@@ -245,7 +254,7 @@ Query: `?cursor=<ts|docId>`
 
   * `ResearchCard` (title, createdAt, status chip)
   * `RefinementQA` (question, textarea, back/next)
-  * `ProviderProgress` (OpenAI/Gemini status: queued/running/success/failure; timestamps)
+  * `ProviderProgress` (OpenAI/Gemini status: idle/queued/running/success/failure; summaries, tokens, timestamps)
   * `Toasts` for errors
 * **Responsive:** Mobile-first; single-column; min tap targets 44px.
 * **Empty States:** Helpful copy; guide to create first research.

@@ -5,7 +5,7 @@ import { startSession as startOpenAiSession } from "@/lib/providers/openaiDeepRe
 import { getResearchRepository } from "@/server/repositories/researchRepository";
 import { z } from "zod";
 import { logger } from "@/lib/utils/logger";
-import { serializeResearch } from "./serialize";
+import { serializeResearch } from "@/server/serializers/research";
 
 const createResearchSchema = z.object({
   title: z
