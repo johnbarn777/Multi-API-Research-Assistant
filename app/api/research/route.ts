@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
 import { startSession as startOpenAiSession } from "@/lib/providers/openaiDeepResearch";
 import { getResearchRepository } from "@/server/repositories/researchRepository";

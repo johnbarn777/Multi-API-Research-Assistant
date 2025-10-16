@@ -28,6 +28,8 @@
 - API routes leverage `src/server/auth/session.ts` helpers (`ensureAuthenticated`, `requireAuth`) to read the injected headers and short-circuit unauthorized calls with a `401` JSON response.
 - Page requests without valid credentials are redirected to `/sign-in?redirectedFrom=<path>`.
 - The React tree is wrapped with `AuthProvider` from `src/lib/firebase/auth-context.tsx` so client components can call `useAuth()` for loading state, the current Firebase user, and the latest ID token.
+- `AuthProvider` mirrors refreshed ID tokens into a `firebaseToken` cookie (1-hour max-age, `SameSite=Strict`) so middleware can authenticate soft navigations without extra API calls.
+- `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` after success.
 - Local development can opt into a synthetic session by setting `DEV_AUTH_BYPASS=true` (and optional UID/email overrides). When active in non-production environments, the middleware injects those headers without hitting Firebase so `pnpm dev` can render authenticated pages.
 
 ## Data Access Layer
@@ -51,7 +53,9 @@
 - **Node runtime** (Vercel Serverless Function) for provider calls, PDF generation, and email sending.
 - **Secrets** via Vercel environment variables. Gmail OAuth tokens should be encrypted (see `TOKEN_ENCRYPTION_KEY`).
 - Environment helpers (`getServerEnv` / `getPublicEnv`) ensure server secrets stay off the client bundle while still validating configuration with Zod.
-- **Firestore Indexes** – `research` collection should index `(ownerUid ASC, createdAt DESC)`.
+- **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
+- **Firestore Rules** – `firestore.rules` locks access to authenticated users’ own `users/{uid}` and `research/{id}` documents; deployed with the CLI alongside indexes on 2025-10-15.
+- **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
 
 ## Observability
 
@@ -63,7 +67,7 @@
 
 ## TODO Highlights
 
-- Implement Firebase Auth session validation and Firestore access control.
+- Verify Firebase Auth session validation end-to-end against the deployed Firestore rules.
 - Integrate OpenAI Deep Research & Gemini using provider utilities.
 - Flesh out PDF layouts with multi-page support in `src/lib/pdf/builder.ts`.
 - Build resilient email delivery with Gmail + SendGrid fallback.

@@ -33,6 +33,15 @@ export default defineConfig({
   webServer: {
     command: "pnpm dev",
     url: "http://localhost:3000",
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: !process.env.CI,
+    env: {
+      DEV_AUTH_BYPASS: "true",
+      NEXT_PUBLIC_DEV_AUTH_BYPASS: "true",
+      DEV_AUTH_BYPASS_UID: "e2e-user",
+      DEV_AUTH_BYPASS_EMAIL: "e2e@example.com",
+      DEV_AUTH_BYPASS_TOKEN: "playwright-stub-token",
+      OPENAI_API_KEY: "test-openai-key",
+      OPENAI_DR_BASE_URL: "https://api.openai.com/v1"
+    }
   }
 });

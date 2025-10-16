@@ -24,6 +24,8 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Flesh out `middleware.ts` to verify Firebase ID tokens, inject `uid` and `email` into request headers, and redirect unauthenticated traffic to `/sign-in` with the original path in `redirectedFrom`.~~
 - ~~Create `src/server/auth/session.ts` helpers for asserting authenticated requests inside API routes/server actions.~~
 - ~~Add session-aware layout wrappers in `app/(auth)/layout.tsx` and global providers to surface `useAuth` hook state.~~
+- ~~Expose lazy Firebase Analytics bootstrap (`getClientAnalytics`) gated behind measurement ID availability.~~ (2025-10-15)
+- ~~Wire `/sign-in` to the Firebase Google provider via `signInWithPopup`, persisting sessions locally and honoring `redirectedFrom`.~~ (2025-10-15)
 
 > **Note:** The redirect target was updated from `/` to `/sign-in` to align with the dedicated sign-in route and automated E2E coverage.
 
@@ -43,6 +45,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Implement Firestore converters/repositories in `src/server/repositories/researchRepository.ts` supporting create, update, getById, listByOwner with pagination, and state transition checks.~~
 - ~~Add user repository for Gmail OAuth token persistence.~~
 - ~~Ensure server helpers enforce `ownerUid` authorization before returning data.~~
+- ~~Deploy baseline Firestore security rules and owner-scoped composite index via Firebase CLI (2025-10-15).~~
 
 **Testing**
 - ~~Unit: Repository logic using Firebase emulator or mocked Firestore (success + invalid transitions).~~ (Covered via Vitest with an in-memory Firestore double.)
@@ -75,7 +78,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 **Testing**
 - Unit: Schema validation tests for create payload; ensure failure when `title` empty or > length. _(Deferred – to be added with broader validation coverage.)_
 - ~~Integration: Supertest covering success path (mocking OpenAI) and provider failure fallback to `status: failed` with error message stored.~~ _(Implemented as a 502 retry response; no Firestore write on provider failure. Tests: `pnpm test:integration`.)_
-- E2E: Playwright test for new research creation showing first question (after next commit hooking detail view).
+- ~~E2E: Playwright test for new research creation showing first question (after next commit hooking detail view).~~ (`tests/e2e/research.spec.ts` intercepts API responses for deterministic assertions.)
 
 ## Commit 6: Refinement loop API + client components
 
@@ -167,3 +170,4 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - Unit: None new beyond lint/typecheck.
 - Integration: CI workflow ensures `pnpm lint`, `pnpm test`, `pnpm test:integration` pass locally.
 - E2E: Playwright mobile viewport test confirming no horizontal scroll; accessibility scan passes.
+> Status (2025-10-15): `pnpm lint` now passes after normalizing type-only imports, tightening provider/email typings, and wiring the Firebase sign-in flow, unblocking the CI lint gate.

@@ -1,5 +1,8 @@
 import { getServerEnv } from "@/config/env";
-import { normalizeOpenAIDeepResearchResult } from "@/lib/providers/normalizers";
+import {
+  normalizeOpenAIDeepResearchResult,
+  type OpenAIDeepResearchRunPayload
+} from "@/lib/providers/normalizers";
 import { logger } from "@/lib/utils/logger";
 import type { ProviderResult } from "@/types/research";
 
@@ -12,6 +15,52 @@ interface FetchWithRetryOptions {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_INITIAL_DELAY_MS = 500;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function toNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeQuestionPayload(
+  question: unknown,
+  fallbackIndex: number
+): { index: number; text: string } | null {
+  if (typeof question === "string") {
+    const text = toTrimmedString(question);
+    return text ? { index: fallbackIndex, text } : null;
+  }
+
+  if (isRecord(question)) {
+    const candidate = question as {
+      index?: unknown;
+      text?: unknown;
+      prompt?: unknown;
+    };
+    const text =
+      toTrimmedString(candidate.text) ?? toTrimmedString(candidate.prompt);
+    if (!text) {
+      return null;
+    }
+    const indexValue =
+      typeof candidate.index === "number" && Number.isFinite(candidate.index)
+        ? candidate.index
+        : fallbackIndex;
+    return { index: indexValue, text };
+  }
+
+  return null;
+}
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => {
@@ -137,17 +186,16 @@ export async function startSession({ topic, context }: StartSessionOptions): Pro
   );
 
   const payload = await safeJson(response);
-  const data = (payload ?? {}) as Record<string, any>;
+  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
 
-  const questions: Array<{ index: number; text: string }> = Array.isArray(data.questions)
-    ? data.questions.map((question: any, index: number) => ({
-        index: typeof question.index === "number" ? question.index : index + 1,
-        text: typeof question.text === "string" ? question.text : String(question)
-      }))
-    : [];
+  const questionsRaw = Array.isArray(data.questions) ? data.questions : [];
+  const questions = questionsRaw
+    .map((question, index) => normalizeQuestionPayload(question, index + 1))
+    .filter((item): item is { index: number; text: string } => item !== null);
 
+  const sessionIdValue = data.id;
   const result: StartSessionResult = {
-    sessionId: typeof data.id === "string" ? data.id : "",
+    sessionId: typeof sessionIdValue === "string" ? sessionIdValue : "",
     questions,
     raw: payload
   };
@@ -199,27 +247,17 @@ export async function submitAnswer({ sessionId, answer }: SubmitAnswerOptions): 
   );
 
   const payload = await safeJson(response);
-  const data = (payload ?? {}) as Record<string, any>;
+  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
 
   const nextQuestionPayload = data.next_question ?? data.nextQuestion;
-  const finalPrompt = typeof (data.final_prompt ?? data.finalPrompt) === "string"
-    ? (data.final_prompt ?? data.finalPrompt)
-    : undefined;
+  const questionsAnswered = toNumber(data.questions_answered);
+  const fallbackIndex = questionsAnswered ? questionsAnswered + 1 : 1;
 
-  const nextQuestion = nextQuestionPayload
-    ? {
-        index:
-          typeof nextQuestionPayload.index === "number"
-            ? nextQuestionPayload.index
-            : data.questions_answered
-              ? data.questions_answered + 1
-              : 1,
-        text:
-          typeof nextQuestionPayload.text === "string"
-            ? nextQuestionPayload.text
-            : String(nextQuestionPayload)
-      }
-    : undefined;
+  const normalizedNext = normalizeQuestionPayload(nextQuestionPayload, fallbackIndex);
+  const nextQuestion = normalizedNext ?? undefined;
+
+  const finalPromptValue = data.final_prompt ?? data.finalPrompt;
+  const finalPrompt = toTrimmedString(finalPromptValue);
 
   return {
     nextQuestion,
@@ -268,10 +306,11 @@ export async function executeRun({ sessionId, prompt }: ExecuteRunOptions): Prom
   );
 
   const payload = await safeJson(response);
-  const data = (payload ?? {}) as Record<string, any>;
+  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
 
-  const runId = typeof (data.id ?? data.run_id) === "string" ? data.id ?? data.run_id : "";
-  const status = typeof data.status === "string" ? data.status : "queued";
+  const runIdCandidate = data.id ?? data.run_id;
+  const runId = typeof runIdCandidate === "string" ? runIdCandidate : "";
+  const status = toTrimmedString(data.status) ?? "queued";
 
   if (!runId) {
     throw new Error("OpenAI Deep Research run response did not include an id");
@@ -336,11 +375,13 @@ export async function pollResult({
     );
 
     const payload = await safeJson(response);
-    const data = (payload ?? {}) as Record<string, any>;
-    const status = typeof data.status === "string" ? data.status : "unknown";
+    const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
+    const status = toTrimmedString(data.status) ?? "unknown";
 
     if (status === "completed") {
-      const normalized = normalizeOpenAIDeepResearchResult(data);
+      const normalized = normalizeOpenAIDeepResearchResult(
+        data as OpenAIDeepResearchRunPayload
+      );
       return {
         status,
         result: normalized,
@@ -349,11 +390,11 @@ export async function pollResult({
     }
 
     if (status === "failed") {
-      const errorMessage =
-        typeof data.error?.message === "string"
-          ? data.error.message
-          : "OpenAI Deep Research run reported failure";
-      throw new Error(errorMessage);
+      const errorPayload = data.error;
+      const errorMessage = isRecord(errorPayload)
+        ? toTrimmedString(errorPayload.message)
+        : toTrimmedString(errorPayload);
+      throw new Error(errorMessage ?? "OpenAI Deep Research run reported failure");
     }
 
     attempt += 1;

@@ -64,6 +64,20 @@ export function AuthProvider({ children }: PropsWithChildren): JSX.Element {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const secureFlag = window.location.protocol === "https:" ? "; Secure" : "";
+    if (state.token) {
+      const maxAgeSeconds = 60 * 60; // 1 hour; token refresh handled by Firebase SDK.
+      document.cookie = `firebaseToken=${state.token}; Path=/; Max-Age=${maxAgeSeconds}; SameSite=Strict${secureFlag}`;
+    } else {
+      document.cookie = `firebaseToken=; Path=/; Max-Age=0; SameSite=Strict${secureFlag}`;
+    }
+  }, [state.token]);
+
   const value = useMemo(() => state, [state]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

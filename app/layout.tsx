@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ReactNode } from "react";
+import type { ReactNode } from "react";
 import { AuthProvider } from "@/lib/firebase/auth-context";
 import "./globals.css";
 

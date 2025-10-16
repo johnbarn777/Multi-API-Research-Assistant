@@ -1,7 +1,13 @@
 import sgMail from "@sendgrid/mail";
 import { getServerEnv } from "@/config/env";
+import { logger } from "@/lib/utils/logger";
 
-export async function sendWithSendgrid(_: {
+export async function sendWithSendgrid({
+  to,
+  subject,
+  body,
+  pdfBuffer
+}: {
   to: string;
   subject: string;
   body: string;
@@ -20,6 +26,12 @@ export async function sendWithSendgrid(_: {
   sgMail.setApiKey(apiKey);
 
   // TODO: send the email with the PDF attachment.
+  logger.warn("email.sendgrid.not_implemented", {
+    to,
+    subject,
+    bodyLength: body.length,
+    attachmentBytes: pdfBuffer.byteLength
+  });
   return {
     ok: false,
     reason: "Not implemented"

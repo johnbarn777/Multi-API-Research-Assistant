@@ -12,6 +12,7 @@
   * **PDF generation:** `pdf-lib` or `pdfkit` (Node) with server-side rendering
   * **Email:** **Gmail API (preferred)** using OAuth (user-consented `gmail.send` scope). **Fallback**: SendGrid/Mailgun transactional email.
 * **Hosting/DevOps:** Vercel (Edge where feasible; Node runtime for PDF & email). CI: GitHub Actions.
+* **Analytics:** Firebase Analytics (web) – lazy-loaded in the client when a measurement ID is configured.
 * **Testing:** Unit + Integration + E2E (required for all requirements): Jest/Vitest, Supertest, Playwright.
 
 ---
@@ -546,6 +547,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC1: `src/config/env.ts` validates required server vs client variables separately and fails fast on missing/invalid values.
 * AC2: `TOKEN_ENCRYPTION_KEY` must be a 32-byte base64 string used to decrypt Gmail OAuth payloads.
 * AC3: Gmail OAuth tokens can be round-tripped via AES-256-GCM helpers in `src/lib/security/crypto.ts`.
+* Note: `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` is optional and only required when Firebase Analytics is enabled.
 
 **Unit**
 
@@ -564,6 +566,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 * Initial `pnpm test:unit` run failed because Vitest lacked an alias for `@/`; fixed by updating `vitest.config.ts`/`vitest.integration.config.ts`, after which the suite passes.
 * Commit 3 introduces a typed Firestore data layer; repository unit tests (Vitest) validate state transitions & pagination, and integration coverage exercises `/api/research` create/list flows with middleware in place.
+* 2025-10-15: `pnpm lint` now passes after normalizing type-only imports, removing `any` usage in provider clients, and tightening placeholder email stubs.
+* 2025-10-15: Google sign-in is wired via Firebase Auth (`signInWithPopup` + `browserLocalPersistence`) and the client syncs the `firebaseToken` cookie for middleware consumption.
 
 ---
 
@@ -588,6 +592,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 * **AC:** Authz checks on every API route; encryption for Gmail tokens.
 * **Test:** Integration attempts to access other user’s doc → 403.
+* **Status (2025-10-15):** Firestore rules deployed via CLI lock `users/{uid}` and `research/{id}` documents to the owning UID; verify API layer alignment during integration tests.
 
 **NFR-5 Reliability**
 

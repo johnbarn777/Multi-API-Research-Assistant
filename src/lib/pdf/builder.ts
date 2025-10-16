@@ -13,7 +13,7 @@ export async function buildResearchPdf(payload: PdfPayload): Promise<Uint8Array>
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const page = pdfDoc.addPage();
-  const { height, width } = page.getSize();
+  const { height } = page.getSize();
 
   const writeLine = (text: string, y: number, size = 14) => {
     page.drawText(text, {

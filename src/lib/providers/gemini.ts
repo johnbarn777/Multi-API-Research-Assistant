@@ -22,6 +22,24 @@ const DEFAULT_POLLING_ATTEMPTS = 10;
 const DEFAULT_POLLING_DELAY_MS = 1000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface GeminiOperationResponse extends GeminiGenerateContentPayload {
+  name?: string;
+  done?: boolean;
+  response?: GeminiGenerateContentPayload;
+  result?: GeminiGenerateContentPayload;
+  error?: {
+    message?: string;
+  };
+}
+
+function toGeminiOperationResponse(value: unknown): GeminiOperationResponse {
+  return isRecord(value) ? (value as GeminiOperationResponse) : {};
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -150,18 +168,17 @@ export async function generateContent({
   );
 
   const payload = await safeJson(response);
-  const data = (payload ?? {}) as Record<string, any>;
+  const data = toGeminiOperationResponse(payload);
 
-  if (Array.isArray(data.candidates)) {
-    const normalized = normalizeGeminiResult(data);
-    return normalized;
+  if (Array.isArray(data.candidates) && data.candidates.length > 0) {
+    return normalizeGeminiResult(data);
   }
 
   const name = typeof data.name === "string" ? data.name : undefined;
-  const done = data.done === true;
+  const isDone = data.done === true;
 
-  if (done && data.response) {
-    return normalizeGeminiResult(data.response as Record<string, unknown>);
+  if (isDone && isRecord(data.response)) {
+    return normalizeGeminiResult(data.response as GeminiGenerateContentPayload);
   }
 
   if (!name) {
@@ -207,11 +224,11 @@ export async function pollOperation(
     );
 
     const payload = await safeJson(response);
-    const data = (payload ?? {}) as Record<string, any>;
+    const data = toGeminiOperationResponse(payload);
 
     if (data.done === true) {
       const resultPayload = data.response ?? data.result ?? data;
-      return normalizeGeminiResult(resultPayload as Record<string, unknown>);
+      return normalizeGeminiResult(resultPayload);
     }
 
     if (data.error) {

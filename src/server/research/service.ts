@@ -8,12 +8,13 @@ import {
 import { generateContent as generateGeminiContent } from "@/lib/providers/gemini";
 import { buildResearchPdf } from "@/lib/pdf/builder";
 import { sendResearchReport } from "@/lib/email";
+import type { ProviderResult } from "@/types/research";
 
 // Placeholder orchestrator functions documented only. Actual implementations will
 // interact with Firestore and provider SDKs.
 
 export async function createResearchStub(title: string) {
-  void adminDb;
+  adminDb();
   const session = await startOpenAiSession({ topic: title });
   return {
     id: "stub-id",
@@ -59,16 +60,16 @@ export async function finalizeResearchStub({
   gemini,
   email
 }: {
-  openAi: unknown;
-  gemini: unknown;
+  openAi: ProviderResult;
+  gemini: ProviderResult;
   email: string;
 }) {
   const pdfBytes = await buildResearchPdf({
     title: "placeholder",
     userEmail: email,
     createdAt: new Date().toISOString(),
-    openAi: openAi as any,
-    gemini: gemini as any
+    openAi,
+    gemini
   });
 
   const emailResult = await sendResearchReport({
