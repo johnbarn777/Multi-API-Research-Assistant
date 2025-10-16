@@ -1,15 +1,21 @@
 import { adminDb } from "@/lib/firebase/admin";
-import { startDeepResearchSession, submitDeepResearchAnswer, executeDeepResearch } from "@/lib/providers/openai";
-import { runGeminiResearch } from "@/lib/providers/gemini";
+import {
+  executeRun as executeOpenAiRun,
+  pollResult as pollOpenAiResult,
+  startSession as startOpenAiSession,
+  submitAnswer as submitOpenAiAnswer
+} from "@/lib/providers/openaiDeepResearch";
+import { generateContent as generateGeminiContent } from "@/lib/providers/gemini";
 import { buildResearchPdf } from "@/lib/pdf/builder";
 import { sendResearchReport } from "@/lib/email";
+import type { ProviderResult } from "@/types/research";
 
 // Placeholder orchestrator functions documented only. Actual implementations will
 // interact with Firestore and provider SDKs.
 
 export async function createResearchStub(title: string) {
-  void adminDb;
-  const session = await startDeepResearchSession(title);
+  adminDb();
+  const session = await startOpenAiSession({ topic: title });
   return {
     id: "stub-id",
     status: "refining",
@@ -24,7 +30,7 @@ export async function answerRefinementStub({
   sessionId: string;
   answer: string;
 }) {
-  return submitDeepResearchAnswer({ sessionId, answer });
+  return submitOpenAiAnswer({ sessionId, answer });
 }
 
 export async function runProvidersStub({
@@ -35,8 +41,15 @@ export async function runProvidersStub({
   finalPrompt: string;
 }) {
   const [openAi, gemini] = await Promise.all([
-    executeDeepResearch({ sessionId, prompt: finalPrompt }),
-    runGeminiResearch(finalPrompt)
+    (async () => {
+      const { runId } = await executeOpenAiRun({ sessionId, prompt: finalPrompt });
+      const { result } = await pollOpenAiResult({ runId });
+      if (!result) {
+        throw new Error("OpenAI Deep Research run completed without a result payload");
+      }
+      return result;
+    })(),
+    generateGeminiContent({ prompt: finalPrompt })
   ]);
 
   return { openAi, gemini };
@@ -47,16 +60,16 @@ export async function finalizeResearchStub({
   gemini,
   email
 }: {
-  openAi: unknown;
-  gemini: unknown;
+  openAi: ProviderResult;
+  gemini: ProviderResult;
   email: string;
 }) {
   const pdfBytes = await buildResearchPdf({
     title: "placeholder",
     userEmail: email,
     createdAt: new Date().toISOString(),
-    openAi: openAi as any,
-    gemini: gemini as any
+    openAi,
+    gemini
   });
 
   const emailResult = await sendResearchReport({

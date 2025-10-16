@@ -12,6 +12,7 @@
   * **PDF generation:** `pdf-lib` or `pdfkit` (Node) with server-side rendering
   * **Email:** **Gmail API (preferred)** using OAuth (user-consented `gmail.send` scope). **Fallback**: SendGrid/Mailgun transactional email.
 * **Hosting/DevOps:** Vercel (Edge where feasible; Node runtime for PDF & email). CI: GitHub Actions.
+* **Analytics:** Firebase Analytics (web) – lazy-loaded in the client when a measurement ID is configured.
 * **Testing:** Unit + Integration + E2E (required for all requirements): Jest/Vitest, Supertest, Playwright.
 
 ---
@@ -373,9 +374,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Acceptance Criteria**
 
-* AC1: `POST /api/research` creates doc with `awaiting_refinements`.
-* AC2: Back-end opens DR session and stores `dr.sessionId` + initial questions array; sets `status: refining` if questions exist.
-* AC3: UI shows first question.
+* AC1: `POST /api/research` creates the document and defaults to `status: "awaiting_refinements"` with sanitized title.
+* AC2: When the provider returns initial questions, the handler stores `dr.sessionId`, snapshots the array, and transitions status to `"refining"`.
+* AC3: UI form submits a topic, optimistic updates the dashboard list, and redirects to the detail page to continue refinements.
 
 **Unit**
 
@@ -384,8 +385,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Integration**
 
-* IT1: `POST /api/research` → Firestore write + DR call mock → stored doc matches shape.
-* IT2: Error path: DR unavailable → set `status: failed` and surface toast.
+* IT1: `POST /api/research` → Firestore write + DR call mock → stored doc matches shape (`sessionId`, `questions`, status).
+* IT2: Error path: DR unavailable → API returns `502` with `{ error }`; no document created so user can retry.
+* IT3: `GET /api/research/:id` → returns owner-scoped document with initial questions surfaced for the UI.
 
 **E2E**
 
@@ -393,8 +395,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Pass/Fail**
 
-* **Pass:** Document state transitions and questions rendered.
-* **Fail:** Session id not stored or questions missing when provider returns them.
+* **Pass:** Document persists with session metadata, dashboard reflects new entry immediately, `/research/[id]` renders the first question, and user is routed to continue refinements.
+* **Fail:** Session id missing, questions not stored when provided, question view not hydrated, or API fails to surface actionable error on provider failure.
 
 ---
 
@@ -545,6 +547,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC1: `src/config/env.ts` validates required server vs client variables separately and fails fast on missing/invalid values.
 * AC2: `TOKEN_ENCRYPTION_KEY` must be a 32-byte base64 string used to decrypt Gmail OAuth payloads.
 * AC3: Gmail OAuth tokens can be round-tripped via AES-256-GCM helpers in `src/lib/security/crypto.ts`.
+* Note: `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` is optional and only required when Firebase Analytics is enabled.
 
 **Unit**
 
@@ -563,6 +566,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 * Initial `pnpm test:unit` run failed because Vitest lacked an alias for `@/`; fixed by updating `vitest.config.ts`/`vitest.integration.config.ts`, after which the suite passes.
 * Commit 3 introduces a typed Firestore data layer; repository unit tests (Vitest) validate state transitions & pagination, and integration coverage exercises `/api/research` create/list flows with middleware in place.
+* 2025-10-15: `pnpm lint` now passes after normalizing type-only imports, removing `any` usage in provider clients, and tightening placeholder email stubs.
+* 2025-10-15: Google sign-in is wired via Firebase Auth (`signInWithPopup` + `browserLocalPersistence`) and the client syncs the `firebaseToken` cookie for middleware consumption.
 
 ---
 
@@ -587,6 +592,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 * **AC:** Authz checks on every API route; encryption for Gmail tokens.
 * **Test:** Integration attempts to access other user’s doc → 403.
+* **Status (2025-10-15):** Firestore rules deployed via CLI lock `users/{uid}` and `research/{id}` documents to the owning UID; verify API layer alignment during integration tests.
 
 **NFR-5 Reliability**
 
@@ -597,8 +603,9 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 ## 14) Implementation Notes (MVP)
 
-* **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction: `startSession()`, `submitAnswer()`, `execute()`, `poll()`.
-* **Gemini**: simple `generateContent` with `finalPrompt`. Normalize output.
+* **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction (`src/lib/providers/openaiDeepResearch.ts`) covering `startSession()`, `submitAnswer()`, `executeRun()`, `pollResult()` with retry/backoff.
+* **Gemini**: `generateContent` (`src/lib/providers/gemini.ts`) accepts the refined prompt, retries transient failures, and polls pending operations when necessary.
+* **Provider normalization**: Map provider responses into `ProviderResult` via `src/lib/providers/normalizers.ts` so downstream consumers have a consistent shape.
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
 * **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).

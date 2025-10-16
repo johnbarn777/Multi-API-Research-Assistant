@@ -40,7 +40,9 @@ function resetDevBypassEnv() {
   }
 }
 
-function createRequest(url: string, init?: RequestInit) {
+type NextRequestInit = ConstructorParameters<typeof NextRequest>[1];
+
+function createRequest(url: string, init?: NextRequestInit) {
   return new NextRequest(new URL(url), init);
 }
 
