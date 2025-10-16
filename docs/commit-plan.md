@@ -111,14 +111,14 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 8: PDF generation service
 
 **Implementation Steps**
-- Create `src/lib/pdf/builder.ts` using `pdf-lib` to assemble cover page, OpenAI section, Gemini section, metadata footer.
-- Implement utility to upload PDF to Firebase Storage (if configured) or return buffer path; update repository to store `report.pdfPath`.
-- Add unit-friendly sample data for deterministic PDF output and Byte signature tests.
+- ~~Create `src/lib/pdf/builder.ts` using `pdf-lib` to assemble cover page, OpenAI section, Gemini section, metadata footer.~~ (`src/lib/pdf/builder.ts`)
+- ~~Implement utility to upload PDF to Firebase Storage (if configured) or return buffer path; update repository to store `report.pdfPath`.~~ (`src/lib/pdf/storage.ts`, `src/server/research/finalize.ts`, `app/api/research/[id]/finalize/route.ts`)
+- ~~Add unit-friendly sample data for deterministic PDF output and Byte signature tests.~~ (`src/tests/fixtures/researchReport.ts`)
 
 **Testing**
-- Unit: Vitest verifying builder outputs `%PDF` header, includes section titles, and handles missing provider gracefully.
-- Integration: Supertest invoking `/api/research/[id]/finalize` with mock data verifying PDF buffer length and storage path recorded.
-- E2E: Playwright downloads PDF link and asserts header via API route.
+- ~~Unit: Vitest verifying builder outputs `%PDF` header, includes section titles, and handles missing provider gracefully.~~ (`tests/unit/pdf/builder.test.ts`)
+- ~~Integration: Supertest invoking `/api/research/[id]/finalize` with mock data verifying PDF buffer length and storage path recorded.~~ (`tests/integration/research-finalize.test.ts`)
+- ~~E2E: Playwright downloads PDF link and asserts header via API route.~~ (`tests/e2e/research.spec.ts`)
 
 ## Commit 9: Email delivery pipeline with Gmail + SendGrid fallback
 

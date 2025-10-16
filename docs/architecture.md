@@ -6,7 +6,7 @@
 2. **Research Creation** – Client calls `/api/research` to create a Firestore document (defaults to `awaiting_refinements`, immediately transitions to `refining` when the provider returns questions) and start the OpenAI Deep Research session.
 3. **Refinement Loop** – UI surfaces one question at a time. Answers are posted to `/api/research/:id/openai/answer`, which now persists `{index, answer}` pairs, appends provider follow-ups, and transitions the research to `ready_to_run` once `finalPrompt` arrives. The client uses `hydrateRefinementState` (server action) plus the `RefinementQA` component to retain local drafts across navigation while the state machine advances.
 4. **Parallel Execution** – `/api/research/:id/run` (`scheduleResearchRun`) transitions the doc to `running`, then kicks off OpenAI Deep Research and Gemini in parallel using `Promise.all`. Each provider sets its own `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as it settles so partial success is recorded. The research status flips to `completed` when at least one provider succeeds; otherwise it becomes `failed`.
-5. **Finalization** – `/api/research/:id/finalize` assembles a PDF report, attempts Gmail delivery (SendGrid fallback), updates `report.emailStatus`, and marks the research as completed.
+5. **Finalization** – `/api/research/:id/finalize` builds the comparative PDF via `pdf-lib`, persists it to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is available (otherwise exposes an in-memory `buffer://` path), and records `report.pdfPath` for downstream actions. Email delivery will hook in on top of this artefact in the next commit.
 
 ## Directory Responsibilities
 
@@ -14,6 +14,7 @@
 - `src/components/` – Reusable presentational components (cards, progress indicators, refinement UI).
 - `src/config/` – Environment parsing and validation.
 - `src/lib/` – Provider wrappers, response normalizers, Firebase helpers, utilities for PDF/email/logging.
+- `src/lib/pdf/` – Report builder and storage utilities shared by the finalize pipeline.
 - `src/lib/api/` – Lightweight client-side fetch helpers shared across pages/components.
 - `src/lib/security/` – Encryption helpers for Gmail OAuth tokens and future secret utilities.
 - `src/hooks/` – Client hooks (e.g., SWR-powered research list subscription) that wrap shared fetch helpers.
@@ -69,6 +70,6 @@
 
 - Verify Firebase Auth session validation end-to-end against the deployed Firestore rules.
 - Integrate OpenAI Deep Research & Gemini using provider utilities.
-- Flesh out PDF layouts with multi-page support in `src/lib/pdf/builder.ts`.
+- Continue iterating on PDF layout polish (typography, spacing, optional tables) in `src/lib/pdf/builder.ts`.
 - Build resilient email delivery with Gmail + SendGrid fallback.
 - Add full coverage tests referencing requirement matrix in the project brief.

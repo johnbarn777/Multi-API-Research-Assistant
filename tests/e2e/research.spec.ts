@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { buildResearchPdf } from "../../src/lib/pdf/builder";
+import { SAMPLE_PDF_PAYLOAD } from "../../src/tests/fixtures/researchReport";
 
 const DEV_BYPASS_ENABLED =
   process.env.DEV_AUTH_BYPASS === "true" || process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
@@ -412,5 +414,33 @@ test.describe("Research flow", () => {
     await expect(openAiCard).toContainText("Success");
     await expect(geminiCard).toContainText("Success");
     await expect(runButton).toBeHidden();
+  });
+
+  test("finalize API returns a PDF payload", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    const researchId = "research-e2e-pdf";
+    const pdfBytes = await buildResearchPdf(SAMPLE_PDF_PAYLOAD);
+    const pdfBuffer = Buffer.from(pdfBytes);
+
+    await page.route(`**/api/research/${researchId}/finalize`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Length": pdfBuffer.length.toString(),
+          "X-Report-Pdf-Path": "buffer://e2e/research.pdf"
+        },
+        body: pdfBuffer
+      });
+    });
+
+    const response = await page.request.post(`/api/research/${researchId}/finalize`);
+    expect(response.ok()).toBeTruthy();
+    expect(response.headers()["content-type"]).toContain("application/pdf");
+    expect(response.headers()["x-report-pdf-path"]).toBe("buffer://e2e/research.pdf");
+
+    const body = await response.body();
+    expect(body.subarray(0, 4).toString("ascii")).toBe("%PDF");
   });
 });

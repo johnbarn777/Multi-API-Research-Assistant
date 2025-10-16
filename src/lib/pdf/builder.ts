@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import type { ProviderResult } from "@/types/research";
 
 export type PdfPayload = {
@@ -11,13 +11,159 @@ export type PdfPayload = {
 
 export async function buildResearchPdf(payload: PdfPayload): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const page = pdfDoc.addPage();
-  const { height } = page.getSize();
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const writeLine = (text: string, y: number, size = 14) => {
-    page.drawText(text, {
-      x: 50,
+  const pages: PDFPage[] = [];
+  const margin = 56;
+
+  let currentPage: PDFPage;
+  let cursorY: number;
+  let contentWidth: number;
+
+  const setCurrentPage = (page: PDFPage) => {
+    currentPage = page;
+    const { height, width } = currentPage.getSize();
+    cursorY = height - margin;
+    contentWidth = width - margin * 2;
+  };
+
+  const addPage = () => {
+    const page = pdfDoc.addPage();
+    pages.push(page);
+    setCurrentPage(page);
+    return page;
+  };
+
+  const lineHeightFor = (size: number) => size * 1.35;
+
+  const ensureSpace = (lineHeight: number) => {
+    if (cursorY - lineHeight < margin) {
+      addPage();
+    }
+  };
+
+  const wrapText = (text: string, font: PDFFont, size: number): string[] => {
+    const sanitized = text
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map((line) => line.trim());
+
+    const lines: string[] = [];
+
+    for (const segment of sanitized) {
+      if (segment.length === 0) {
+        lines.push("");
+        continue;
+      }
+
+      const words = segment.split(/\s+/);
+      let currentLine = "";
+
+      for (const word of words) {
+        const tentative = currentLine.length > 0 ? `${currentLine} ${word}` : word;
+        const width = font.widthOfTextAtSize(tentative, size);
+
+        if (width <= contentWidth) {
+          currentLine = tentative;
+          continue;
+        }
+
+        if (currentLine.length > 0) {
+          lines.push(currentLine);
+          currentLine = word;
+          continue;
+        }
+
+        lines.push(word);
+        currentLine = "";
+      }
+
+      if (currentLine.length > 0) {
+        lines.push(currentLine);
+      }
+
+      lines.push("");
+    }
+
+    while (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+
+    return lines;
+  };
+
+  const writeLines = ({
+    text,
+    font = regularFont,
+    size = 12,
+    color = rgb(0.1, 0.1, 0.1),
+    indent = 0,
+    spacing = lineHeightFor(size)
+  }: {
+    text: string;
+    font?: PDFFont;
+    size?: number;
+    color?: ReturnType<typeof rgb>;
+    indent?: number;
+    spacing?: number;
+  }) => {
+    const lines = wrapText(text, font, size);
+
+    for (const line of lines) {
+      if (line === "") {
+        cursorY -= spacing * 0.5;
+        continue;
+      }
+
+      ensureSpace(spacing);
+      currentPage.drawText(line, {
+        x: margin + indent,
+        y: cursorY,
+        size,
+        font,
+        color
+      });
+
+      cursorY -= spacing;
+    }
+  };
+
+  const writeHeading = (text: string, level: 1 | 2 | 3) => {
+    const size = level === 1 ? 20 : level === 2 ? 16 : 13;
+    const spacing = lineHeightFor(size);
+    ensureSpace(spacing * 1.5);
+    cursorY -= spacing * 0.3;
+    writeLines({
+      text,
+      font: boldFont,
+      size
+    });
+    cursorY -= spacing * 0.4;
+  };
+
+  const writeList = (items: string[]) => {
+    if (!items.length) {
+      return;
+    }
+
+    for (const item of items) {
+      writeLines({
+        text: `• ${item}`,
+        indent: 14
+      });
+    }
+  };
+
+  // --- Cover page ---
+  const coverPage = addPage();
+  const { height: coverHeight } = coverPage.getSize();
+
+  const drawCentered = (text: string, y: number, size: number, font: PDFFont) => {
+    const { width } = coverPage.getSize();
+    const textWidth = font.widthOfTextAtSize(text, size);
+    coverPage.drawText(text, {
+      x: Math.max(margin, (width - textWidth) / 2),
       y,
       size,
       font,
@@ -25,15 +171,118 @@ export async function buildResearchPdf(payload: PdfPayload): Promise<Uint8Array>
     });
   };
 
-  writeLine("Multi-API Research Assistant Report", height - 50, 18);
-  writeLine(`Title: ${payload.title}`, height - 80);
-  writeLine(`Generated for: ${payload.userEmail}`, height - 100);
-  writeLine(`Created at: ${payload.createdAt}`, height - 120);
+  drawCentered("Multi-API Research Assistant", coverHeight - 120, 26, boldFont);
+  drawCentered("Comparative Research Report", coverHeight - 160, 20, regularFont);
 
-  // TODO: Expand with multi-page layout that renders summaries and insights.
-  writeLine("Section A: OpenAI Deep Research (placeholder content)", height - 160);
-  writeLine("Section B: Gemini Research (placeholder content)", height - 200);
+  writeLines({
+    text: `Research Title: ${payload.title}`,
+    font: boldFont,
+    size: 16
+  });
+  writeLines({
+    text: `Prepared for: ${payload.userEmail}`,
+    size: 12
+  });
+  writeLines({
+    text: `Created at: ${payload.createdAt}`,
+    size: 12
+  });
+  cursorY -= lineHeightFor(12) * 1.5;
+  writeLines({
+    text: "This report compares findings generated by OpenAI Deep Research and Google Gemini using the finalized research prompt."
+  });
 
-  const pdfBytes = await pdfDoc.save();
-  return pdfBytes;
+  // Start a fresh page for provider content.
+  addPage();
+
+  const renderProviderSection = (label: string, result: ProviderResult | null) => {
+    writeHeading(label, 1);
+
+    if (!result) {
+      writeLines({
+        text: "No findings were recorded for this provider. The provider may have failed or has not run yet."
+      });
+      cursorY -= lineHeightFor(12);
+      return;
+    }
+
+    if (result.summary) {
+      writeHeading("Summary", 2);
+      writeLines({ text: result.summary });
+      cursorY -= lineHeightFor(12);
+    }
+
+    if (result.insights?.length) {
+      writeHeading("Key Insights", 2);
+      writeList(result.insights);
+      cursorY -= lineHeightFor(12);
+    }
+
+    if (result.sources?.length) {
+      writeHeading("Sources", 2);
+      result.sources.forEach((source, index) => {
+        writeLines({
+          text: `${index + 1}. ${source.title}`,
+          font: boldFont,
+          size: 12
+        });
+        if (source.url) {
+          writeLines({
+            text: source.url,
+            size: 11,
+            color: rgb(0, 0.27, 0.53)
+          });
+        }
+        cursorY -= lineHeightFor(11) * 0.5;
+      });
+    }
+
+    if (result.meta) {
+      const metaLines: string[] = [];
+      if (result.meta.model) {
+        metaLines.push(`Model: ${result.meta.model}`);
+      }
+      if (result.meta.tokens !== undefined) {
+        metaLines.push(`Tokens: ${result.meta.tokens}`);
+      }
+      if (result.meta.startedAt) {
+        metaLines.push(`Started: ${result.meta.startedAt}`);
+      }
+      if (result.meta.completedAt) {
+        metaLines.push(`Completed: ${result.meta.completedAt}`);
+      }
+
+      if (metaLines.length > 0) {
+        writeHeading("Metadata", 3);
+        metaLines.forEach((line) => {
+          writeLines({ text: line });
+        });
+      }
+    }
+
+    cursorY -= lineHeightFor(12) * 0.75;
+  };
+
+  renderProviderSection("OpenAI Deep Research", payload.openAi);
+  addPage();
+  renderProviderSection("Google Gemini", payload.gemini);
+
+  const footerBase = `Generated ${payload.createdAt} • Multi-API Research Assistant`;
+
+  pages.forEach((page, index) => {
+    const footerSize = 10;
+    const { width } = page.getSize();
+    const footerText = `${footerBase} • Page ${index + 1} of ${pages.length}`;
+    const textWidth = regularFont.widthOfTextAtSize(footerText, footerSize);
+
+    page.drawText(footerText, {
+      x: Math.max(margin, (width - textWidth) / 2),
+      y: margin / 2,
+      size: footerSize,
+      font: regularFont,
+      color: rgb(0.4, 0.4, 0.4)
+    });
+  });
+
+  return pdfDoc.save();
 }

@@ -239,7 +239,15 @@ Query: `?cursor=<ts|docId>`
 
 ### 7.6 `POST /api/research/:id/finalize`
 
-(Internal) **Resp:** `{ emailed: boolean }`
+(Internal) Generates the comparative PDF report once provider runs settle. Responds with `application/pdf` body (`Content-Disposition: attachment`) and headers:
+
+* `X-Report-Pdf-Path` – Cloud Storage object path when `FIREBASE_STORAGE_BUCKET` is configured, otherwise a `buffer://` placeholder for ephemeral downloads.
+* `X-Storage-Status` – `"uploaded"` when persisted to storage, `"skipped"` when only in-memory buffer is available.
+
+Side effects:
+
+* Updates `research.report.pdfPath` with the returned path.
+* Leaves report email status untouched (email delivery handled in Commit 9).
 
 ---
 
@@ -302,6 +310,7 @@ Query: `?cursor=<ts|docId>`
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_STORAGE_BUCKET= # optional; when set, PDFs uploaded to this bucket
 NEXT_PUBLIC_FIREBASE_API_KEY=
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=
@@ -480,15 +489,15 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 
 **Unit**
 
-* UT1: PDF builder renders section titles and lists given mock data.
+* UT1: PDF builder renders section titles and lists given mock data. (Covered via `tests/unit/pdf/builder.test.ts`.)
 
 **Integration**
 
-* IT1: `/finalize` builds PDF buffer for stored results.
+* IT1: `/finalize` builds PDF buffer for stored results. (Covered via `tests/integration/research-finalize.test.ts`.)
 
 **E2E**
 
-* EE1: After completion, “Download PDF” link works and opens a valid PDF (Playwright verifies bytes start with `%PDF`).
+* EE1: After completion, “Download PDF” link works and opens a valid PDF (Playwright verifies bytes start with `%PDF`). (Covered via `tests/e2e/research.spec.ts`.)
 
 **Pass/Fail**
 
