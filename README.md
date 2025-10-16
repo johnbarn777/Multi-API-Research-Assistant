@@ -110,6 +110,10 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 - **Testing:** Add emulator-backed integration tests and Playwright scenarios once the API contracts are fulfilled.
 - **CI/CD:** Create GitHub Actions workflow (lint + tests) and configure Vercel project settings when deploying.
 
+## Deploying to Vercel
+
+The application is optimized for Vercel’s hybrid Edge/Node platform. Follow the [Vercel staging deployment guide](docs/deployment/vercel-staging.md) for step-by-step instructions on wiring environment variables, OAuth redirect URIs, and preview branch deployments so reviewers can exercise the full dynamic experience without local setup.
+
 ## Testing Strategy
 
 - **Unit:** Vitest + Testing Library for UI/state logic; sample test provided for research state machine.
