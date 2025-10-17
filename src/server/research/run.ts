@@ -1,0 +1,407 @@
+import {
+  executeRun as executeOpenAiRun,
+  pollResult as pollOpenAiResult
+} from "@/lib/providers/openaiDeepResearch";
+import { generateContent as generateGeminiContent } from "@/lib/providers/gemini";
+import { logger } from "@/lib/utils/logger";
+import {
+  getResearchRepository,
+  InvalidResearchStateError,
+  ResearchNotFoundError,
+  type ResearchRepository
+} from "@/server/repositories/researchRepository";
+import type { ProviderResult, Research, ResearchProviderState } from "@/types/research";
+
+type ProviderKind = "openai" | "gemini";
+
+interface ProviderOutcomeSuccess {
+  provider: ProviderKind;
+  status: "success";
+  result: ProviderResult;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  jobId?: string;
+}
+
+interface ProviderOutcomeFailure {
+  provider: ProviderKind;
+  status: "failure";
+  error: string;
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
+  jobId?: string;
+}
+
+type ProviderOutcome = ProviderOutcomeSuccess | ProviderOutcomeFailure;
+
+interface ScheduleResearchRunInput {
+  researchId: string;
+  ownerUid: string;
+}
+
+interface ScheduleResearchRunResult {
+  research: Research;
+  alreadyRunning: boolean;
+}
+
+const RUNNABLE_STATUS = "ready_to_run";
+const RUNNING_STATUS = "running";
+
+const GEMINI_POLLING_CONFIG = {
+  maxAttempts: 10,
+  initialDelayMs: 1000
+};
+
+function sanitizePrompt(prompt: string | undefined): string | null {
+  const trimmed = prompt?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function sanitizeSessionId(sessionId: string | undefined): string | null {
+  const trimmed = sessionId?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function resolveProviderPatch(outcome: ProviderOutcome): ResearchProviderState {
+  if (outcome.status === "success") {
+    return {
+      status: "success",
+      result: outcome.result,
+      error: null,
+      durationMs: outcome.durationMs,
+      startedAt: outcome.startedAt,
+      completedAt: outcome.completedAt,
+      jobId: outcome.jobId
+    };
+  }
+
+  return {
+    status: "failure",
+    result: undefined,
+    error: outcome.error,
+    durationMs: outcome.durationMs,
+    startedAt: outcome.startedAt,
+    completedAt: outcome.completedAt,
+    jobId: outcome.jobId
+  };
+}
+
+async function runOpenAiProvider({
+  researchId,
+  sessionId,
+  prompt
+}: {
+  researchId: string;
+  sessionId: string;
+  prompt: string;
+}): Promise<ProviderOutcome> {
+  const started = Date.now();
+  const startedAt = new Date().toISOString();
+  let jobId: string | undefined;
+
+  try {
+    logger.info("research.run.openai.start", {
+      researchId
+    });
+
+    const execution = await executeOpenAiRun({
+      sessionId,
+      prompt
+    });
+
+    jobId = execution.runId;
+
+    const pollResult = await pollOpenAiResult({
+      runId: jobId
+    });
+
+    if (!pollResult.result) {
+      throw new Error("OpenAI Deep Research did not return a result payload");
+    }
+
+    const completedAt = new Date().toISOString();
+
+    logger.info("research.run.openai.completed", {
+      researchId,
+      runId: jobId
+    });
+
+    return {
+      provider: "openai",
+      status: "success",
+      result: pollResult.result,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt,
+      jobId
+    };
+  } catch (error) {
+    const completedAt = new Date().toISOString();
+    const message =
+      error instanceof Error ? error.message : "OpenAI Deep Research execution failed";
+
+    logger.error("research.run.openai.failed", {
+      researchId,
+      runId: jobId,
+      error: message
+    });
+
+    return {
+      provider: "openai",
+      status: "failure",
+      error: message,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt,
+      jobId
+    };
+  }
+}
+
+async function runGeminiProvider({
+  researchId,
+  prompt
+}: {
+  researchId: string;
+  prompt: string;
+}): Promise<ProviderOutcome> {
+  const started = Date.now();
+  const startedAt = new Date().toISOString();
+
+  try {
+    logger.info("research.run.gemini.start", {
+      researchId
+    });
+
+    const result = await generateGeminiContent({
+      prompt,
+      polling: GEMINI_POLLING_CONFIG
+    });
+
+    const completedAt = new Date().toISOString();
+
+    logger.info("research.run.gemini.completed", {
+      researchId
+    });
+
+    return {
+      provider: "gemini",
+      status: "success",
+      result,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt
+    };
+  } catch (error) {
+    const completedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : "Gemini execution failed";
+
+    logger.error("research.run.gemini.failed", {
+      researchId,
+      error: message
+    });
+
+    return {
+      provider: "gemini",
+      status: "failure",
+      error: message,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt
+    };
+  }
+}
+
+async function executeProviders({
+  repository,
+  researchId,
+  ownerUid,
+  sessionId,
+  finalPrompt
+}: {
+  repository: ResearchRepository;
+  researchId: string;
+  ownerUid: string;
+  sessionId: string;
+  finalPrompt: string;
+}): Promise<void> {
+  let openAiOutcome: ProviderOutcome | null = null;
+  let geminiOutcome: ProviderOutcome | null = null;
+
+  try {
+    const [openAiResult, geminiResult] = await Promise.all([
+      runOpenAiProvider({ researchId, sessionId, prompt: finalPrompt }).then(async (outcome) => {
+        openAiOutcome = outcome;
+        await repository.update(
+          researchId,
+          {
+            dr: resolveProviderPatch(outcome)
+          },
+          { ownerUid }
+        );
+        return outcome;
+      }),
+      runGeminiProvider({ researchId, prompt: finalPrompt }).then(async (outcome) => {
+        geminiOutcome = outcome;
+        await repository.update(
+          researchId,
+          {
+            gemini: resolveProviderPatch(outcome)
+          },
+          { ownerUid }
+        );
+        return outcome;
+      })
+    ]);
+
+    openAiOutcome = openAiResult;
+    geminiOutcome = geminiResult;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Provider execution failed";
+    logger.error("research.run.providers.persist_failed", {
+      researchId,
+      error: message
+    });
+
+    // Attempt to mark the research as failed while preserving the latest provider outcomes.
+    const fallbackPatch: Record<string, ResearchProviderState | undefined> = {};
+    if (openAiOutcome) {
+      fallbackPatch.dr = resolveProviderPatch(openAiOutcome);
+    }
+    if (geminiOutcome) {
+      fallbackPatch.gemini = resolveProviderPatch(geminiOutcome);
+    }
+
+    await repository
+      .update(
+        researchId,
+        {
+          status: "failed",
+          ...(fallbackPatch.dr ? { dr: fallbackPatch.dr } : {}),
+          ...(fallbackPatch.gemini ? { gemini: fallbackPatch.gemini } : {})
+        },
+        { ownerUid }
+      )
+      .catch((persistError) => {
+        logger.error("research.run.providers.final_persist_failed", {
+          researchId,
+          error: persistError instanceof Error ? persistError.message : String(persistError)
+        });
+      });
+
+    return;
+  }
+
+  const hasSuccess =
+    (openAiOutcome?.status === "success" ? 1 : 0) +
+    (geminiOutcome?.status === "success" ? 1 : 0) >
+    0;
+
+  const finalStatus = hasSuccess ? "completed" : "failed";
+
+  try {
+    await repository.update(
+      researchId,
+      {
+        status: finalStatus
+      },
+      { ownerUid }
+    );
+  } catch (error) {
+    logger.error("research.run.final_status_failed", {
+      researchId,
+      nextStatus: finalStatus,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+export async function scheduleResearchRun({
+  researchId,
+  ownerUid
+}: ScheduleResearchRunInput): Promise<ScheduleResearchRunResult> {
+  const repository = getResearchRepository();
+  const research = await repository.getById(researchId, { ownerUid });
+
+  if (!research) {
+    throw new ResearchNotFoundError(researchId);
+  }
+
+  if (research.status === RUNNING_STATUS) {
+    logger.info("research.run.already_running", {
+      researchId
+    });
+    return {
+      research,
+      alreadyRunning: true
+    };
+  }
+
+  if (research.status !== RUNNABLE_STATUS) {
+    throw new InvalidResearchStateError(
+      `Research ${researchId} is not ready to run (current status: ${research.status})`
+    );
+  }
+
+  const finalPrompt = sanitizePrompt(research.dr.finalPrompt);
+  if (!finalPrompt) {
+    throw Object.assign(new Error("Research does not have a final prompt to execute"), {
+      statusCode: 409
+    });
+  }
+
+  const sessionId = sanitizeSessionId(research.dr.sessionId);
+  if (!sessionId) {
+    throw Object.assign(new Error("Research is missing the OpenAI Deep Research sessionId"), {
+      statusCode: 409
+    });
+  }
+
+  const startedAt = new Date().toISOString();
+
+  const updated = await repository.update(
+    researchId,
+    {
+      status: RUNNING_STATUS,
+      dr: {
+        status: "running",
+        startedAt,
+        completedAt: undefined,
+        durationMs: 0,
+        error: null,
+        result: undefined,
+        jobId: undefined
+      },
+      gemini: {
+        status: "running",
+        startedAt,
+        completedAt: undefined,
+        durationMs: 0,
+        error: null,
+        result: undefined,
+        jobId: undefined
+      }
+    },
+    { ownerUid }
+  );
+
+  void executeProviders({
+    repository,
+    researchId,
+    ownerUid,
+    sessionId,
+    finalPrompt
+  }).catch((error) => {
+    logger.error("research.run.unhandled_error", {
+      researchId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  });
+
+  return {
+    research: updated,
+    alreadyRunning: false
+  };
+}

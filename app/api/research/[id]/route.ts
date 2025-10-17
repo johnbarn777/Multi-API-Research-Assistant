@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
 import { getResearchRepository } from "@/server/repositories/researchRepository";
-import { serializeResearch } from "@/app/api/research/serialize";
+import { serializeResearch } from "@/server/serializers/research";
 
 type Params = {
   params: {

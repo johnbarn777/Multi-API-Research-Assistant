@@ -25,7 +25,14 @@ export function useResearchDetail(id: string | null) {
     key,
     fetchResearchDetail,
     {
-      revalidateOnFocus: false
+      revalidateOnFocus: false,
+      refreshInterval(latestData) {
+        if (!latestData?.item) {
+          return 0;
+        }
+
+        return latestData.item.status === "running" ? 2500 : 0;
+      }
     }
   );
 

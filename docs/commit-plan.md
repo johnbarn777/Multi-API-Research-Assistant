@@ -24,6 +24,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Flesh out `middleware.ts` to verify Firebase ID tokens, inject `uid` and `email` into request headers, and redirect unauthenticated traffic to `/sign-in` with the original path in `redirectedFrom`.~~
 - ~~Create `src/server/auth/session.ts` helpers for asserting authenticated requests inside API routes/server actions.~~
 - ~~Add session-aware layout wrappers in `app/(auth)/layout.tsx` and global providers to surface `useAuth` hook state.~~
+- ~~Introduce a global `AppHeader` + `UserMenu` displaying the active user and providing sign-out/reauth controls across the shell.~~
 - ~~Expose lazy Firebase Analytics bootstrap (`getClientAnalytics`) gated behind measurement ID availability.~~ (2025-10-15)
 - ~~Wire `/sign-in` to the Firebase Google provider via `signInWithPopup`, persisting sessions locally and honoring `redirectedFrom`.~~ (2025-10-15)
 
@@ -83,54 +84,56 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 6: Refinement loop API + client components
 
 **Implementation Steps**
-- Implement `/api/research/[id]/openai/answer` route handling question submission, storing answers, and detecting final prompt transitions.
-- Add server action/helper for fetching next question state for UI hydration.
-- Build `RefinementQA` component (in `src/components/research/RefinementQA.tsx`) with back/next controls, textarea, and progress indicator.
-- Update `app/research/[id]/page.tsx` to render refinement stepper when status is `awaiting_refinements` or `refining`, persisting local answers until saved.
+- ~~Implement `/api/research/[id]/openai/answer` route handling question submission, storing answers, and detecting final prompt transitions.~~
+- ~~Add server action/helper for fetching next question state for UI hydration.~~
+- ~~Build `RefinementQA` component (in `src/components/research/RefinementQA.tsx`) with back/next controls, textarea, and progress indicator.~~
+- ~~Update `app/research/[id]/page.tsx` to render refinement stepper when status is `awaiting_refinements` or `refining`, persisting local answers until saved.~~
 
 **Testing**
-- Unit: Reducer/component logic tests (Vitest + React Testing Library) ensuring navigation retains answers and disables submit until text present.
-- Integration: Supertest for answer route (mocking provider) verifying Firestore updates and final prompt status change.
-- E2E: Playwright scenario completing multi-question refinement and seeing “Ready to Run” state.
+- ~~Unit: Reducer/component logic tests (Vitest + React Testing Library) ensuring navigation retains answers and disables submit until text present.~~ (`pnpm test:unit`)
+- ~~Integration: Supertest for answer route (mocking provider) verifying Firestore updates and final prompt status change.~~ (`pnpm test:integration`)
+- ~~E2E: Playwright scenario completing multi-question refinement and seeing “Ready to Run” state.~~ (`pnpm test:e2e --project=chromium`)
 
 ## Commit 7: Parallel provider execution orchestration
 
 **Implementation Steps**
-- Add `/api/research/[id]/run` route that transitions status to `running`, triggers OpenAI execute + Gemini generate in parallel (Promise.allSettled) using background tasks (Next.js route handler async).
-- Implement polling/backoff helpers to update Firestore with intermediate provider status, durations, errors.
-- Update research detail page with `ProviderProgress` component showing state of each provider with streaming updates (e.g., via polling or SWR revalidation).
-- Ensure state machine allows partial success and records failure reasons.
+- ~~Add `/api/research/[id]/run` route that transitions status to `running`, triggers OpenAI execute + Gemini generate in parallel (Promise.allSettled) using background tasks (Next.js route handler async).~~
+- ~~Implement polling/backoff helpers to update Firestore with intermediate provider status, durations, errors.~~
+- ~~Update research detail page with `ProviderProgress` component showing state of each provider with streaming updates (e.g., via polling or SWR revalidation).~~
+- ~~Ensure state machine allows partial success and records failure reasons.~~
 
 **Testing**
-- Unit: Tests for orchestration helper ensuring retries, partial failure handling, and status transitions.
-- Integration: Supertest hitting `/run` with mocked providers returning success and failure; assert Firestore updates and final state.
-- E2E: Playwright test clicking “Run” and observing both provider cards progress to completion.
+- ~~Unit: Tests for orchestration helper ensuring retries, partial failure handling, and status transitions.~~ (`tests/unit/researchRun.test.ts`)
+- ~~Integration: Supertest hitting `/run` with mocked providers returning success and failure; assert Firestore updates and final state.~~ (`tests/integration/api-research.test.ts`)
+- ~~E2E: Playwright test clicking “Run” and observing both provider cards progress to completion.~~ (`tests/e2e/research.spec.ts`)
+
+> **Note:** `pnpm test:e2e` still expects valid Firebase Admin credentials (project id + service account). Local runs without these secrets will fail while booting the Next.js dev server; supply the real keys when executing the suite.
 
 ## Commit 8: PDF generation service
 
 **Implementation Steps**
-- Create `src/lib/pdf/builder.ts` using `pdf-lib` to assemble cover page, OpenAI section, Gemini section, metadata footer.
-- Implement utility to upload PDF to Firebase Storage (if configured) or return buffer path; update repository to store `report.pdfPath`.
-- Add unit-friendly sample data for deterministic PDF output and Byte signature tests.
+- ~~Create `src/lib/pdf/builder.ts` using `pdf-lib` to assemble cover page, OpenAI section, Gemini section, metadata footer.~~ (`src/lib/pdf/builder.ts`)
+- ~~Implement utility to upload PDF to Firebase Storage (if configured) or return buffer path; update repository to store `report.pdfPath`.~~ (`src/lib/pdf/storage.ts`, `src/server/research/finalize.ts`, `app/api/research/[id]/finalize/route.ts`)
+- ~~Add unit-friendly sample data for deterministic PDF output and Byte signature tests.~~ (`src/tests/fixtures/researchReport.ts`)
 
 **Testing**
-- Unit: Vitest verifying builder outputs `%PDF` header, includes section titles, and handles missing provider gracefully.
-- Integration: Supertest invoking `/api/research/[id]/finalize` with mock data verifying PDF buffer length and storage path recorded.
-- E2E: Playwright downloads PDF link and asserts header via API route.
+- ~~Unit: Vitest verifying builder outputs `%PDF` header, includes section titles, and handles missing provider gracefully.~~ (`tests/unit/pdf/builder.test.ts`)
+- ~~Integration: Supertest invoking `/api/research/[id]/finalize` with mock data verifying PDF buffer length and storage path recorded.~~ (`tests/integration/research-finalize.test.ts`)
+- ~~E2E: Playwright downloads PDF link and asserts header via API route.~~ (`tests/e2e/research.spec.ts`)
 
 ## Commit 9: Email delivery pipeline with Gmail + SendGrid fallback
 
 **Implementation Steps**
-- Implement `src/lib/email/gmail.ts` for OAuth token refresh (using stored encrypted token) and RFC822 message assembly with PDF attachment.
-- Implement `src/lib/email/sendgrid.ts` fallback sender.
-- Create orchestrator in `src/server/email/sendResearchReport.ts` selecting provider based on token validity, recording status and errors.
-- Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.
-- Surface success/error toast/banners on research detail page once email attempt finishes.
+- ~~Implement `src/lib/email/gmail.ts` for OAuth token refresh (using stored encrypted token) and RFC822 message assembly with PDF attachment.~~ (`sendWithGmail` now refreshes tokens, builds multipart message, and logs outcomes.)
+- ~~Implement `src/lib/email/sendgrid.ts` fallback sender.~~
+- ~~Create orchestrator in `src/server/email/sendResearchReport.ts` selecting provider based on token validity, recording status and errors.~~ (Persists refreshed tokens, clears invalid grants, records `report.emailStatus`/`emailError`.)
+- ~~Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.~~ (`app/api/research/[id]/finalize/route.ts` now emits email headers.)
+- ~~Surface success/error toast/banners on research detail page once email attempt finishes.~~ (`app/research/[id]/page.tsx` shows success/failure banners leveraging `report.emailStatus`/`emailError`.)
 
 **Testing**
-- Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.
-- Integration: Supertest for finalize route with Gmail success, Gmail failure + SendGrid success, both fail -> `failed` status.
-- E2E: Playwright verifying UI shows “Email sent” or “Email failed” banner based on mocked API response.
+- ~~Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.~~ (`tests/unit/email/gmail.test.ts`, `tests/unit/email/sendResearchReport.test.ts`)
+- ~~Integration: Supertest for finalize route with Gmail success, Gmail failure + SendGrid success, both fail -> `failed` status.~~ (`tests/integration/research-finalize.test.ts`)
+- ~~E2E: Playwright verifying UI shows “Email sent” or “Email failed” banner based on mocked API response.~~ (`tests/e2e/research.spec.ts`)
 
 ## Commit 10: Dashboard & history UX polish
 

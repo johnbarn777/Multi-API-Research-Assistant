@@ -105,7 +105,7 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 - **Firestore:** Replace stubbed responses with Firestore reads/writes, enforce ownership checks per requirement.
 - **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openaiDeepResearch.ts`.
 - **Gemini:** Wire `generateContent` to invoke the appropriate Gemini model (with polling when required) and normalize the output.
-- **PDF & Email:** Expand `buildResearchPdf` for full layout, then send via Gmail or SendGrid using `sendResearchReport`.
+- **PDF & Email:** Expand `buildResearchPdf` for full layout, then deliver via `sendResearchReportEmail` (Gmail first, SendGrid fallback).
 - **State Machine:** Use `src/server/research/state-machine.ts` to validate transitions, surface errors consistently via `AppError`.
 - **Testing:** Add emulator-backed integration tests and Playwright scenarios once the API contracts are fulfilled.
 - **CI/CD:** Create GitHub Actions workflow (lint + tests) and configure Vercel project settings when deploying.

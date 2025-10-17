@@ -101,23 +101,33 @@ Sequence (happy path):
 * `dr`: {
 
   * `sessionId?: string`,
+  * `jobId?: string`,
   * `questions: Array<{ index: number, text: string }>`,
   * `answers: Array<{ index: number, answer: string }>`,
   * `finalPrompt?: string`,
+  * `status?: "idle" | "queued" | "running" | "success" | "failure"`,
   * `result?: ProviderResult`,
-  * `durationMs?: number`
+  * `durationMs?: number`,
+  * `startedAt?: string`,
+  * `completedAt?: string`,
+  * `error?: string | null`
     }
 * `gemini`: {
 
   * `jobId?: string`,
+  * `status?: "idle" | "queued" | "running" | "success" | "failure"`,
   * `result?: ProviderResult`,
-  * `durationMs?: number`
+  * `durationMs?: number`,
+  * `startedAt?: string`,
+  * `completedAt?: string`,
+  * `error?: string | null`
     }
 * `report`: {
 
   * `pdfPath?: string` (Cloud Storage path or ephemeral)
   * `emailedTo?: string`
   * `emailStatus?: "queued" | "sent" | "failed"`
+  * `emailError?: string | null`
     }
 * `createdAt: Timestamp`
 * `updatedAt: Timestamp`
@@ -136,7 +146,7 @@ interface ProviderResult {
 
 **Indexes**
 
-* `research` composite index: `ownerUid ASC, createdAt DESC`
+* `research` composite index: `ownerUid ASC, createdAt DESC, __name__ DESC`
 
 ---
 
@@ -198,7 +208,7 @@ Upon `"Run"` or auto‑continue:
 
   * If Gmail tokens present and valid → `gmail.users.messages.send` with base64 RFC822 + PDF attachment
   * Else fallback → SendGrid API `mail/send`
-* Update `report.emailStatus` and store PDF location if persisted.
+* Update `report.emailStatus`/`report.emailError` and store PDF location if persisted.
 * Set `status: "completed"`.
 
 ---
@@ -226,11 +236,19 @@ Query: `?cursor=<ts|docId>`
 
 ### 7.5 `POST /api/research/:id/run`
 
-**Resp:** `{ ok: true }` → asynchronous progression to `completed`.
+**Resp:** `{ item: Research, alreadyRunning?: boolean }` → transitions research to `running` and triggers OpenAI + Gemini execution in background (`Promise.allSettled`). Firestore updates each provider’s `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as runs settle (supports partial success).
 
 ### 7.6 `POST /api/research/:id/finalize`
 
-(Internal) **Resp:** `{ emailed: boolean }`
+(Internal) Generates the comparative PDF report once provider runs settle. Responds with `application/pdf` body (`Content-Disposition: attachment`) and headers:
+
+* `X-Report-Pdf-Path` – Cloud Storage object path when `FIREBASE_STORAGE_BUCKET` is configured, otherwise a `buffer://` placeholder for ephemeral downloads.
+* `X-Storage-Status` – `"uploaded"` when persisted to storage, `"skipped"` when only in-memory buffer is available.
+
+Side effects:
+
+* Updates `research.report.pdfPath` with the returned path.
+* Leaves report email status untouched (email delivery handled in Commit 9).
 
 ---
 
@@ -245,7 +263,7 @@ Query: `?cursor=<ts|docId>`
 
   * `ResearchCard` (title, createdAt, status chip)
   * `RefinementQA` (question, textarea, back/next)
-  * `ProviderProgress` (OpenAI/Gemini status: queued/running/success/failure; timestamps)
+  * `ProviderProgress` (OpenAI/Gemini status: idle/queued/running/success/failure; summaries, tokens, timestamps)
   * `Toasts` for errors
 * **Responsive:** Mobile-first; single-column; min tap targets 44px.
 * **Empty States:** Helpful copy; guide to create first research.
@@ -293,6 +311,7 @@ Query: `?cursor=<ts|docId>`
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_STORAGE_BUCKET= # optional; when set, PDFs uploaded to this bucket
 NEXT_PUBLIC_FIREBASE_API_KEY=
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=
@@ -346,6 +365,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC2: Session persists across refresh; sign‑out clears session.
 * AC3: Server routes reject unauthenticated requests with 401.
 * AC4: Protected routes redirect unauthenticated visitors to `/sign-in` and preserve the original destination.
+* AC5: Global header surfaces current user identity (name/email/avatar when available) and provides an explicit sign-out control.
 
 **Unit Tests**
 
@@ -427,6 +447,8 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * **Pass:** Final prompt persisted and visible; back/next works.
 * **Fail:** Lost answers on navigation; status not updated.
 
+_Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, appends follow-up questions, and transitions research to `ready_to_run` once the final prompt lands. Client `RefinementQA` retains local drafts across navigation. Verified via `pnpm test:unit`, `pnpm test:integration`, and `pnpm test:e2e --project=chromium`._
+
 ---
 
 #### FR-4 Execute Providers in Parallel (OpenAI & Gemini)
@@ -469,15 +491,15 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 
 **Unit**
 
-* UT1: PDF builder renders section titles and lists given mock data.
+* UT1: PDF builder renders section titles and lists given mock data. (Covered via `tests/unit/pdf/builder.test.ts`.)
 
 **Integration**
 
-* IT1: `/finalize` builds PDF buffer for stored results.
+* IT1: `/finalize` builds PDF buffer for stored results. (Covered via `tests/integration/research-finalize.test.ts`.)
 
 **E2E**
 
-* EE1: After completion, “Download PDF” link works and opens a valid PDF (Playwright verifies bytes start with `%PDF`).
+* EE1: After completion, “Download PDF” link works and opens a valid PDF (Playwright verifies bytes start with `%PDF`). (Covered via `tests/e2e/research.spec.ts`.)
 
 **Pass/Fail**
 
@@ -493,21 +515,23 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC1: If `gmail_oauth` exists & valid → send via Gmail API `gmail.send`.
 * AC2: If OAuth absent/invalid → send via SendGrid using `FROM_EMAIL`.
 * AC3: Store `report.emailStatus` (sent/failed) and target email.
+* AC4: Persist `report.emailError` with the provider failure message when delivery fails.
 
 **Unit**
 
-* UT1: RFC822 generator attaches PDF base64.
-* UT2: Fallback selector chooses provider correctly.
+* UT1: RFC822 generator attaches PDF base64. (`tests/unit/email/gmail.test.ts`)
+* UT2: Fallback selector chooses provider correctly. (`tests/unit/email/sendResearchReport.test.ts`)
 
 **Integration**
 
-* IT1: Gmail success mock → status `sent`.
-* IT2: Gmail failure → fallback SendGrid success → status `sent`.
-* IT3: Both fail → status `failed` with error message stored.
+* IT1: Gmail success mock → status `sent`. (`tests/integration/research-finalize.test.ts`)
+* IT2: Gmail failure → fallback SendGrid success → status `sent`. (`tests/integration/research-finalize.test.ts`)
+* IT3: Both fail → status `failed` with error message stored. (`tests/integration/research-finalize.test.ts`)
 
 **E2E**
 
-* EE1: Completing a run results in a “Email sent” banner; webhook/mailbox test optional (mock inbox).
+* EE1: Completing a run results in a “Email sent” banner; webhook/mailbox test optional (mock inbox). (`tests/e2e/research.spec.ts`)
+* EE2: Delivery failure surfaces an “Email failed” banner with the captured reason. (`tests/e2e/research.spec.ts`)
 
 **Pass/Fail**
 

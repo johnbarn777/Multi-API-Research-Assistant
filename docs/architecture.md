@@ -4,9 +4,9 @@
 
 1. **Authentication** – User signs in with Google via Firebase Auth. Middleware attaches the Firebase UID to every server request.
 2. **Research Creation** – Client calls `/api/research` to create a Firestore document (defaults to `awaiting_refinements`, immediately transitions to `refining` when the provider returns questions) and start the OpenAI Deep Research session.
-3. **Refinement Loop** – UI surfaces one question at a time. Answers are posted to `/api/research/:id/openai/answer` until the provider returns a final prompt.
-4. **Parallel Execution** – `/api/research/:id/run` triggers OpenAI Deep Research execution and Gemini generation concurrently. Polling keeps Firestore updated.
-5. **Finalization** – `/api/research/:id/finalize` assembles a PDF report, attempts Gmail delivery (SendGrid fallback), updates `report.emailStatus`, and marks the research as completed.
+3. **Refinement Loop** – UI surfaces one question at a time. Answers are posted to `/api/research/:id/openai/answer`, which now persists `{index, answer}` pairs, appends provider follow-ups, and transitions the research to `ready_to_run` once `finalPrompt` arrives. The client uses `hydrateRefinementState` (server action) plus the `RefinementQA` component to retain local drafts across navigation while the state machine advances.
+4. **Parallel Execution** – `/api/research/:id/run` (`scheduleResearchRun`) transitions the doc to `running`, then kicks off OpenAI Deep Research and Gemini in parallel using `Promise.all`. Each provider sets its own `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as it settles so partial success is recorded. The research status flips to `completed` when at least one provider succeeds; otherwise it becomes `failed`.
+5. **Finalization** – `/api/research/:id/finalize` builds the comparative PDF via `pdf-lib`, persists it to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is available (otherwise exposes an in-memory `buffer://` path), records `report.pdfPath`, then invokes `sendResearchReportEmail`. The email orchestrator refreshes Gmail OAuth tokens when possible, falls back to SendGrid on authentication/network failures, and stamps `report.emailStatus`, `report.emailedTo`, and `report.emailError` accordingly so the UI can surface delivery banners immediately.
 
 ## Directory Responsibilities
 
@@ -14,6 +14,7 @@
 - `src/components/` – Reusable presentational components (cards, progress indicators, refinement UI).
 - `src/config/` – Environment parsing and validation.
 - `src/lib/` – Provider wrappers, response normalizers, Firebase helpers, utilities for PDF/email/logging.
+- `src/lib/pdf/` – Report builder and storage utilities shared by the finalize pipeline.
 - `src/lib/api/` – Lightweight client-side fetch helpers shared across pages/components.
 - `src/lib/security/` – Encryption helpers for Gmail OAuth tokens and future secret utilities.
 - `src/hooks/` – Client hooks (e.g., SWR-powered research list subscription) that wrap shared fetch helpers.
@@ -31,6 +32,7 @@
 - `AuthProvider` mirrors refreshed ID tokens into a `firebaseToken` cookie (1-hour max-age, `SameSite=Strict`) so middleware can authenticate soft navigations without extra API calls.
 - `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` after success.
 - Local development can opt into a synthetic session by setting `DEV_AUTH_BYPASS=true` (and optional UID/email overrides). When active in non-production environments, the middleware injects those headers without hitting Firebase so `pnpm dev` can render authenticated pages.
+- A global `AppHeader` client component renders on every route, surfacing the current auth state via `UserMenu`. This control shows the signed-in user (name/email/avatar when available), provides a direct link back to `/sign-in` when unauthenticated, and invokes Firebase `signOut` before redirecting to `/sign-in` so demo sessions can be closed explicitly.
 
 ## Data Access Layer
 
@@ -44,7 +46,7 @@
 - Dashboard and creation flows use SWR with the Firebase ID token in the cache key so per-user data remains isolated.
 - `useResearchList` provides the paginated list (default page size 20) and exposes `mutate` for optimistic updates.
 - Creating a research session calls `createResearch` helper, then prepends the returned item to the SWR cache before revalidating in the background.
-- Research detail views rely on `useResearchDetail`, fetching `/api/research/:id` to surface the latest refinement questions immediately after creation.
+- Research detail views rely on `useResearchDetail`, fetching `/api/research/:id` to surface the latest refinement questions immediately after creation. The hook now refreshes every ~2.5s while a run is `running` so provider progress badges update without a manual reload.
 - Errors from `/api/research` surface through a shared `ApiError` class so UI components can render consistent messaging.
 
 ## Deployment Considerations
@@ -53,7 +55,7 @@
 - **Node runtime** (Vercel Serverless Function) for provider calls, PDF generation, and email sending.
 - **Secrets** via Vercel environment variables. Gmail OAuth tokens should be encrypted (see `TOKEN_ENCRYPTION_KEY`).
 - Environment helpers (`getServerEnv` / `getPublicEnv`) ensure server secrets stay off the client bundle while still validating configuration with Zod.
-- **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
+- **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC, __name__ DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
 - **Firestore Rules** – `firestore.rules` locks access to authenticated users’ own `users/{uid}` and `research/{id}` documents; deployed with the CLI alongside indexes on 2025-10-15.
 - **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
 
@@ -69,6 +71,6 @@
 
 - Verify Firebase Auth session validation end-to-end against the deployed Firestore rules.
 - Integrate OpenAI Deep Research & Gemini using provider utilities.
-- Flesh out PDF layouts with multi-page support in `src/lib/pdf/builder.ts`.
-- Build resilient email delivery with Gmail + SendGrid fallback.
+- Continue iterating on PDF layout polish (typography, spacing, optional tables) in `src/lib/pdf/builder.ts`.
+- Monitor Gmail + SendGrid delivery telemetry and tune retry thresholds as we collect production data.
 - Add full coverage tests referencing requirement matrix in the project brief.

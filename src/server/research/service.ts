@@ -7,7 +7,7 @@ import {
 } from "@/lib/providers/openaiDeepResearch";
 import { generateContent as generateGeminiContent } from "@/lib/providers/gemini";
 import { buildResearchPdf } from "@/lib/pdf/builder";
-import { sendResearchReport } from "@/lib/email";
+import { sendWithSendgrid } from "@/lib/email";
 import type { ProviderResult } from "@/types/research";
 
 // Placeholder orchestrator functions documented only. Actual implementations will
@@ -72,12 +72,12 @@ export async function finalizeResearchStub({
     gemini
   });
 
-  const emailResult = await sendResearchReport({
+  const emailResult = await sendWithSendgrid({
     to: email,
     subject: "Research report (stub)",
     body: "Research report delivery placeholder.",
     pdfBuffer: Buffer.from(pdfBytes),
-    gmailTokens: null
+    filename: "research-report.pdf"
   });
 
   return emailResult;

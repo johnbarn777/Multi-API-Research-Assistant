@@ -34,7 +34,7 @@ const REQUIRED_ENV: Record<string, string> = {
   NEXT_PUBLIC_FIREBASE_APP_ID: "1:123:web:abc"
 };
 
-const OPTIONAL_ENV_KEYS = ["SENDGRID_API_KEY"] as const;
+const OPTIONAL_ENV_KEYS = ["SENDGRID_API_KEY", "FIREBASE_STORAGE_BUCKET"] as const;
 const ORIGINAL_ENV: Partial<Record<string, string | undefined>> = {};
 
 function applyEnv(overrides: Record<string, string | undefined> = {}) {

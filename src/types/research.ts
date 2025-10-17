@@ -28,6 +28,8 @@ export interface ProviderResult {
   meta?: ProviderMetadata;
 }
 
+export type ProviderRunStatus = "idle" | "queued" | "running" | "success" | "failure";
+
 export interface ResearchProviderState {
   sessionId?: string;
   jobId?: string;
@@ -36,12 +38,17 @@ export interface ResearchProviderState {
   finalPrompt?: string;
   result?: ProviderResult;
   durationMs?: number;
+  status?: ProviderRunStatus;
+  startedAt?: string;
+  completedAt?: string;
+  error?: string | null;
 }
 
 export interface ResearchReportState {
   pdfPath?: string;
   emailedTo?: string;
   emailStatus?: "queued" | "sent" | "failed";
+  emailError?: string | null;
 }
 
 export interface Research {
