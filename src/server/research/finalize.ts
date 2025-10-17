@@ -2,6 +2,10 @@ import { buildResearchPdf } from "@/lib/pdf/builder";
 import { persistResearchPdf } from "@/lib/pdf/storage";
 import { logger } from "@/lib/utils/logger";
 import {
+  sendResearchReportEmail,
+  type SendResearchReportResult
+} from "@/server/email/sendResearchReport";
+import {
   getResearchRepository,
   InvalidResearchStateError,
   ResearchNotFoundError,
@@ -22,6 +26,7 @@ export interface FinalizeResearchResult {
   openAi: ProviderResult | null;
   gemini: ProviderResult | null;
   filename: string;
+  emailResult: SendResearchReportResult | null;
 }
 
 function isAllowedStatus(status: string): status is "completed" | "failed" {
@@ -119,12 +124,75 @@ export async function finalizeResearch({
     pdfPath: storageResult.path
   });
 
+  let emailResult: SendResearchReportResult | null = null;
+
+  if (userEmail) {
+    try {
+      emailResult = await sendResearchReportEmail({
+        researchId,
+        ownerUid,
+        to: userEmail,
+        title: research.title,
+        filename,
+        pdfBuffer
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "Unexpected email delivery failure";
+
+      logger.error("research.finalize.email_unexpected", {
+        researchId,
+        ownerUid,
+        error: reason
+      });
+
+      await repository.update(
+        researchId,
+        {
+          report: {
+            emailedTo: userEmail,
+            emailStatus: "failed",
+            emailError: reason
+          }
+        },
+        { ownerUid }
+      );
+
+      emailResult = {
+        status: "failed",
+        provider: "none",
+        messageId: null,
+        errorMessage: reason
+      };
+    }
+  } else {
+    const reason = "User email not available for delivery";
+    await repository.update(
+      researchId,
+      {
+        report: {
+          emailStatus: "failed",
+          emailError: reason
+        }
+      },
+      { ownerUid }
+    );
+
+    emailResult = {
+      status: "failed",
+      provider: "none",
+      messageId: null,
+      errorMessage: reason
+    };
+  }
+
   return {
     pdfBuffer,
     pdfPath: storageResult.path ?? null,
     storageStatus: storageResult.status,
     openAi: research.dr.result ?? null,
     gemini: research.gemini.result ?? null,
-    filename
+    filename,
+    emailResult
   };
 }

@@ -174,6 +174,22 @@ export default function ResearchDetailPage() {
     }
   })();
   const runButtonDisabled = !canStartRun || isStartingRun;
+  const emailStatus = research?.report?.emailStatus ?? null;
+  const emailedTo = research?.report?.emailedTo ?? null;
+  const emailError = research?.report?.emailError ?? null;
+
+  const emailStatusMeta = (() => {
+    switch (emailStatus) {
+      case "sent":
+        return { label: "Email sent", className: "border-emerald-500 text-emerald-100" };
+      case "failed":
+        return { label: "Email failed", className: "border-rose-500 text-rose-200" };
+      case "queued":
+        return { label: "Email queued", className: "border-amber-400 text-amber-100" };
+      default:
+        return { label: "Awaiting delivery", className: "border-slate-700 text-slate-300" };
+    }
+  })();
 
   const handleAnswerChange = (value: string) => {
     if (!currentQuestion) {
@@ -439,12 +455,31 @@ export default function ResearchDetailPage() {
       <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-6">
         <header className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Final report</h2>
-          <span className="rounded-full border border-slate-700 px-3 py-1 text-xs uppercase text-slate-300">
-            Awaiting completion
+          <span
+            className={`rounded-full border px-3 py-1 text-xs uppercase ${emailStatusMeta.className}`}
+          >
+            {emailStatusMeta.label}
           </span>
         </header>
+        {emailStatus === "sent" ? (
+          <div className="mb-4 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+            Report emailed to {emailedTo ?? "your account"}. Check your inbox for the attached PDF.
+          </div>
+        ) : null}
+        {emailStatus === "failed" ? (
+          <div className="mb-4 rounded-md border border-rose-500/60 bg-rose-500/10 p-4 text-sm text-rose-100">
+            We couldn&apos;t deliver the email automatically.
+            {emailError ? <span className="ml-1">Reason: {emailError}</span> : null}
+          </div>
+        ) : null}
+        {emailStatus === "queued" ? (
+          <div className="mb-4 rounded-md border border-amber-400/60 bg-amber-400/10 p-4 text-sm text-amber-100">
+            The PDF is generating and will be emailed shortly. You will receive a confirmation once delivery
+            completes.
+          </div>
+        ) : null}
         <p className="text-sm text-slate-400">
-          Once both providers complete, the system will generate a PDF report and email it to the user. This area
+          Once both providers complete, the system generates a PDF report and emails it to the user. This area
           will display download links and delivery status.
         </p>
       </section>

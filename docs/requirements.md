@@ -127,6 +127,7 @@ Sequence (happy path):
   * `pdfPath?: string` (Cloud Storage path or ephemeral)
   * `emailedTo?: string`
   * `emailStatus?: "queued" | "sent" | "failed"`
+  * `emailError?: string | null`
     }
 * `createdAt: Timestamp`
 * `updatedAt: Timestamp`
@@ -207,7 +208,7 @@ Upon `"Run"` or auto‑continue:
 
   * If Gmail tokens present and valid → `gmail.users.messages.send` with base64 RFC822 + PDF attachment
   * Else fallback → SendGrid API `mail/send`
-* Update `report.emailStatus` and store PDF location if persisted.
+* Update `report.emailStatus`/`report.emailError` and store PDF location if persisted.
 * Set `status: "completed"`.
 
 ---
@@ -364,6 +365,7 @@ Gmail OAuth tokens must be stored encrypted using the AES-256-GCM helper in `src
 * AC2: Session persists across refresh; sign‑out clears session.
 * AC3: Server routes reject unauthenticated requests with 401.
 * AC4: Protected routes redirect unauthenticated visitors to `/sign-in` and preserve the original destination.
+* AC5: Global header surfaces current user identity (name/email/avatar when available) and provides an explicit sign-out control.
 
 **Unit Tests**
 
@@ -513,21 +515,23 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * AC1: If `gmail_oauth` exists & valid → send via Gmail API `gmail.send`.
 * AC2: If OAuth absent/invalid → send via SendGrid using `FROM_EMAIL`.
 * AC3: Store `report.emailStatus` (sent/failed) and target email.
+* AC4: Persist `report.emailError` with the provider failure message when delivery fails.
 
 **Unit**
 
-* UT1: RFC822 generator attaches PDF base64.
-* UT2: Fallback selector chooses provider correctly.
+* UT1: RFC822 generator attaches PDF base64. (`tests/unit/email/gmail.test.ts`)
+* UT2: Fallback selector chooses provider correctly. (`tests/unit/email/sendResearchReport.test.ts`)
 
 **Integration**
 
-* IT1: Gmail success mock → status `sent`.
-* IT2: Gmail failure → fallback SendGrid success → status `sent`.
-* IT3: Both fail → status `failed` with error message stored.
+* IT1: Gmail success mock → status `sent`. (`tests/integration/research-finalize.test.ts`)
+* IT2: Gmail failure → fallback SendGrid success → status `sent`. (`tests/integration/research-finalize.test.ts`)
+* IT3: Both fail → status `failed` with error message stored. (`tests/integration/research-finalize.test.ts`)
 
 **E2E**
 
-* EE1: Completing a run results in a “Email sent” banner; webhook/mailbox test optional (mock inbox).
+* EE1: Completing a run results in a “Email sent” banner; webhook/mailbox test optional (mock inbox). (`tests/e2e/research.spec.ts`)
+* EE2: Delivery failure surfaces an “Email failed” banner with the captured reason. (`tests/e2e/research.spec.ts`)
 
 **Pass/Fail**
 

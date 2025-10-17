@@ -24,6 +24,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Flesh out `middleware.ts` to verify Firebase ID tokens, inject `uid` and `email` into request headers, and redirect unauthenticated traffic to `/sign-in` with the original path in `redirectedFrom`.~~
 - ~~Create `src/server/auth/session.ts` helpers for asserting authenticated requests inside API routes/server actions.~~
 - ~~Add session-aware layout wrappers in `app/(auth)/layout.tsx` and global providers to surface `useAuth` hook state.~~
+- ~~Introduce a global `AppHeader` + `UserMenu` displaying the active user and providing sign-out/reauth controls across the shell.~~
 - ~~Expose lazy Firebase Analytics bootstrap (`getClientAnalytics`) gated behind measurement ID availability.~~ (2025-10-15)
 - ~~Wire `/sign-in` to the Firebase Google provider via `signInWithPopup`, persisting sessions locally and honoring `redirectedFrom`.~~ (2025-10-15)
 
@@ -123,16 +124,16 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 9: Email delivery pipeline with Gmail + SendGrid fallback
 
 **Implementation Steps**
-- Implement `src/lib/email/gmail.ts` for OAuth token refresh (using stored encrypted token) and RFC822 message assembly with PDF attachment.
-- Implement `src/lib/email/sendgrid.ts` fallback sender.
-- Create orchestrator in `src/server/email/sendResearchReport.ts` selecting provider based on token validity, recording status and errors.
-- Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.
-- Surface success/error toast/banners on research detail page once email attempt finishes.
+- ~~Implement `src/lib/email/gmail.ts` for OAuth token refresh (using stored encrypted token) and RFC822 message assembly with PDF attachment.~~ (`sendWithGmail` now refreshes tokens, builds multipart message, and logs outcomes.)
+- ~~Implement `src/lib/email/sendgrid.ts` fallback sender.~~
+- ~~Create orchestrator in `src/server/email/sendResearchReport.ts` selecting provider based on token validity, recording status and errors.~~ (Persists refreshed tokens, clears invalid grants, records `report.emailStatus`/`emailError`.)
+- ~~Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.~~ (`app/api/research/[id]/finalize/route.ts` now emits email headers.)
+- ~~Surface success/error toast/banners on research detail page once email attempt finishes.~~ (`app/research/[id]/page.tsx` shows success/failure banners leveraging `report.emailStatus`/`emailError`.)
 
 **Testing**
-- Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.
-- Integration: Supertest for finalize route with Gmail success, Gmail failure + SendGrid success, both fail -> `failed` status.
-- E2E: Playwright verifying UI shows “Email sent” or “Email failed” banner based on mocked API response.
+- ~~Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.~~ (`tests/unit/email/gmail.test.ts`, `tests/unit/email/sendResearchReport.test.ts`)
+- ~~Integration: Supertest for finalize route with Gmail success, Gmail failure + SendGrid success, both fail -> `failed` status.~~ (`tests/integration/research-finalize.test.ts`)
+- ~~E2E: Playwright verifying UI shows “Email sent” or “Email failed” banner based on mocked API response.~~ (`tests/e2e/research.spec.ts`)
 
 ## Commit 10: Dashboard & history UX polish
 

@@ -48,6 +48,7 @@ export interface ResearchReportState {
   pdfPath?: string;
   emailedTo?: string;
   emailStatus?: "queued" | "sent" | "failed";
+  emailError?: string | null;
 }
 
 export interface Research {

@@ -11,7 +11,11 @@ import {
   type ResearchRepository,
   type UpdateResearchInput
 } from "@/server/repositories/researchRepository";
-import type { Research, ResearchProviderState } from "@/types/research";
+import {
+  setUserRepository,
+  type UserRepository
+} from "@/server/repositories/userRepository";
+import type { Research, ResearchProviderState, UserProfile } from "@/types/research";
 import {
   SAMPLE_GEMINI_RESULT,
   SAMPLE_OPENAI_RESULT
@@ -26,11 +30,38 @@ const mockPdfStorage = vi.hoisted(() => ({
   persistResearchPdf: vi.fn()
 }));
 
+const TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 1).toString("base64");
+
+const mockEnv = vi.hoisted(() => ({
+  getServerEnv: vi.fn()
+}));
+
+const mockEmail = vi.hoisted(() => ({
+  sendWithGmail: vi.fn(),
+  sendWithSendgrid: vi.fn()
+}));
+
 const verifyFirebaseIdToken = mockTokenVerifier.verifyFirebaseIdToken;
 const persistResearchPdf = mockPdfStorage.persistResearchPdf;
 
 vi.mock("@/lib/firebase/tokenVerifier", () => mockTokenVerifier);
 vi.mock("@/lib/pdf/storage", () => mockPdfStorage);
+vi.mock("@/config/env", () => ({
+  getServerEnv: mockEnv.getServerEnv,
+  getPublicEnv: () => ({}),
+  getEnv: () => ({
+    ...(mockEnv.getServerEnv() as Record<string, unknown>),
+    NEXT_PUBLIC_FIREBASE_API_KEY: "test",
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "example.firebaseapp.com",
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: "test",
+    NEXT_PUBLIC_FIREBASE_APP_ID: "app"
+  }),
+  resetEnvCache: () => {}
+}));
+vi.mock("@/lib/email", () => ({
+  sendWithGmail: mockEmail.sendWithGmail,
+  sendWithSendgrid: mockEmail.sendWithSendgrid
+}));
 
 function cloneProviderState(state?: ResearchProviderState): ResearchProviderState {
   if (!state) {
@@ -135,6 +166,83 @@ class InMemoryResearchRepository implements ResearchRepository {
   }
 }
 
+class InMemoryUserRepository implements UserRepository {
+  private store: Map<string, UserProfile> = new Map();
+  private currentTime = 1_700_500_000_000;
+
+  private nextTimestamp(): Timestamp {
+    this.currentTime += 1_000;
+    return Timestamp.fromMillis(this.currentTime);
+  }
+
+  async getById(uid: string): Promise<UserProfile | null> {
+    return this.store.get(uid) ?? null;
+  }
+
+  async upsertGmailTokens(
+    uid: string,
+    tokens: UserProfile["gmail_oauth"] | null,
+    profile?: { email: string; displayName: string; photoURL?: string }
+  ): Promise<UserProfile> {
+    const existing = this.store.get(uid);
+    const now = this.nextTimestamp();
+
+    if (!existing) {
+      if (!profile) {
+        throw new Error("Profile details are required to create a user document");
+      }
+
+      const created: UserProfile = {
+        uid,
+        email: profile.email,
+        displayName: profile.displayName,
+        photoURL: profile.photoURL,
+        gmail_oauth: tokens ?? undefined,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      this.store.set(uid, created);
+      return created;
+    }
+
+    const next: UserProfile = {
+      ...existing,
+      email: profile?.email ?? existing.email,
+      displayName: profile?.displayName ?? existing.displayName,
+      photoURL: profile?.photoURL ?? existing.photoURL,
+      gmail_oauth: tokens ?? undefined,
+      updatedAt: now
+    };
+
+    this.store.set(uid, next);
+    return next;
+  }
+
+  async updateProfile(
+    uid: string,
+    update: { email?: string; displayName?: string; photoURL?: string | null }
+  ): Promise<UserProfile> {
+    const existing = this.store.get(uid);
+    if (!existing) {
+      throw new Error("User not found");
+    }
+
+    const now = this.nextTimestamp();
+    const next: UserProfile = {
+      ...existing,
+      email: update.email ?? existing.email,
+      displayName: update.displayName ?? existing.displayName,
+      photoURL:
+        update.photoURL === null ? undefined : update.photoURL ?? existing.photoURL,
+      updatedAt: now
+    };
+
+    this.store.set(uid, next);
+    return next;
+  }
+}
+
 function headersFromNode(headers: NodeJS.Dict<string | string[]>) {
   const result = new Headers();
   for (const [key, value] of Object.entries(headers ?? {})) {
@@ -224,19 +332,45 @@ function binaryParser(res: any, callback: (err: Error | null, body?: Buffer) => 
 
 describe("POST /api/research/:id/finalize", () => {
   let repository: InMemoryResearchRepository;
+  let userRepository: InMemoryUserRepository;
 
   beforeEach(() => {
     repository = new InMemoryResearchRepository();
     setResearchRepository(repository);
+    userRepository = new InMemoryUserRepository();
+    setUserRepository(userRepository);
     verifyFirebaseIdToken.mockReset();
     persistResearchPdf.mockReset();
+    mockEmail.sendWithGmail.mockReset();
+    mockEmail.sendWithSendgrid.mockReset();
+    mockEnv.getServerEnv.mockReset();
+    mockEnv.getServerEnv.mockReturnValue({
+      FIREBASE_PROJECT_ID: "test-project",
+      FIREBASE_CLIENT_EMAIL: "service@test.com",
+      FIREBASE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
+      FIREBASE_STORAGE_BUCKET: "test-bucket",
+      OPENAI_API_KEY: "test-openai",
+      OPENAI_DR_BASE_URL: "https://openai.test",
+      GEMINI_API_KEY: "test-gemini",
+      GEMINI_BASE_URL: "https://gemini.test",
+      GEMINI_MODEL: "models/test",
+      GOOGLE_OAUTH_CLIENT_ID: "oauth-client",
+      GOOGLE_OAUTH_CLIENT_SECRET: "oauth-secret",
+      GOOGLE_OAUTH_REDIRECT_URI: "https://example.com/oauth",
+      GOOGLE_OAUTH_SCOPES: "scope",
+      TOKEN_ENCRYPTION_KEY,
+      SENDGRID_API_KEY: "sendgrid",
+      FROM_EMAIL: "reports@example.com",
+      APP_BASE_URL: "https://app.example.com"
+    });
   });
 
   afterEach(() => {
     setResearchRepository(null);
+    setUserRepository(null);
   });
 
-  it("returns a PDF response and records the storage path", async () => {
+  it("sends the report via Gmail and returns the PDF response", async () => {
     verifyFirebaseIdToken.mockResolvedValue({
       uid: "user-123",
       email: "owner@example.com"
@@ -247,6 +381,35 @@ describe("POST /api/research/:id/finalize", () => {
       bucket: "test-bucket",
       path: "reports/research-1/report.pdf",
       storageUri: "gs://test-bucket/reports/research-1/report.pdf"
+    });
+
+    await userRepository.upsertGmailTokens(
+      "user-123",
+      {
+        access_token: "old-access",
+        refresh_token: "old-refresh",
+        expiry_date: Date.now() + 5 * 60_000
+      },
+      {
+        email: "owner@example.com",
+        displayName: "Owner Example"
+      }
+    );
+
+    mockEmail.sendWithGmail.mockResolvedValue({
+      ok: true,
+      messageId: "gmail-123",
+      tokens: {
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        expiry_date: Date.now() + 3_600_000,
+        scope: "gmail.send"
+      }
+    });
+
+    mockEmail.sendWithSendgrid.mockResolvedValue({
+      ok: true,
+      messageId: "sendgrid-ignored"
     });
 
     const seeded = await repository.create({
@@ -273,9 +436,16 @@ describe("POST /api/research/:id/finalize", () => {
       .parse(binaryParser)
       .expect(200);
 
+    expect(mockEmail.sendWithGmail).toHaveBeenCalledTimes(1);
+    expect(mockEmail.sendWithSendgrid).not.toHaveBeenCalled();
+
     expect(response.headers["content-type"]).toContain("application/pdf");
     expect(response.headers["x-storage-status"]).toBe("uploaded");
     expect(response.headers["x-report-pdf-path"]).toBe("reports/research-1/report.pdf");
+    expect(response.headers["x-email-status"]).toBe("sent");
+    expect(response.headers["x-email-provider"]).toBe("gmail");
+    expect(response.headers["x-email-message-id"]).toBe("gmail-123");
+    expect(response.headers["x-email-error"]).toBeUndefined();
 
     const body: Buffer = response.body;
     expect(Buffer.isBuffer(body)).toBe(true);
@@ -290,5 +460,169 @@ describe("POST /api/research/:id/finalize", () => {
 
     const updated = await repository.getById(seeded.id, { ownerUid: "user-123" });
     expect(updated?.report.pdfPath).toBe("reports/research-1/report.pdf");
+    expect(updated?.report.emailStatus).toBe("sent");
+    expect(updated?.report.emailedTo).toBe("owner@example.com");
+    expect(updated?.report.emailError).toBeNull();
+
+    const storedUser = await userRepository.getById("user-123");
+    expect(storedUser?.gmail_oauth?.access_token).toMatch(/^gma1:/);
+    expect(storedUser?.gmail_oauth?.refresh_token).toMatch(/^gma1:/);
+  });
+
+  it("falls back to SendGrid when Gmail delivery fails", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "user-123",
+      email: "owner@example.com"
+    });
+
+    persistResearchPdf.mockResolvedValue({
+      status: "uploaded",
+      bucket: "test-bucket",
+      path: "reports/research-2/report.pdf",
+      storageUri: "gs://test-bucket/reports/research-2/report.pdf"
+    });
+
+    await userRepository.upsertGmailTokens(
+      "user-123",
+      {
+        access_token: "existing-access",
+        refresh_token: "existing-refresh",
+        expiry_date: Date.now() - 5_000
+      },
+      {
+        email: "owner@example.com",
+        displayName: "Owner Example"
+      }
+    );
+
+    mockEmail.sendWithGmail.mockResolvedValue({
+      ok: false,
+      reason: "Access token refresh failed",
+      tokens: {
+        access_token: "refreshed-access",
+        refresh_token: "existing-refresh"
+      },
+      shouldInvalidateCredentials: false
+    });
+
+    mockEmail.sendWithSendgrid.mockResolvedValue({
+      ok: true,
+      messageId: "sendgrid-123"
+    });
+
+    const seeded = await repository.create({
+      ownerUid: "user-123",
+      title: "Finalize Fallback Test",
+      status: "completed",
+      dr: {
+        status: "success",
+        result: SAMPLE_OPENAI_RESULT
+      },
+      gemini: {
+        status: "success",
+        result: SAMPLE_GEMINI_RESULT
+      },
+      report: {}
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post(`/api/research/${seeded.id}/finalize`)
+      .set("Authorization", "Bearer integration-token")
+      .buffer(true)
+      .parse(binaryParser)
+      .expect(200);
+
+    expect(mockEmail.sendWithGmail).toHaveBeenCalledTimes(1);
+    expect(mockEmail.sendWithSendgrid).toHaveBeenCalledTimes(1);
+
+    expect(response.headers["x-email-status"]).toBe("sent");
+    expect(response.headers["x-email-provider"]).toBe("sendgrid");
+    expect(response.headers["x-email-message-id"]).toBe("sendgrid-123");
+
+    const updated = await repository.getById(seeded.id, { ownerUid: "user-123" });
+    expect(updated?.report.emailStatus).toBe("sent");
+    expect(updated?.report.emailedTo).toBe("owner@example.com");
+    expect(updated?.report.emailError).toBeNull();
+
+    const storedUser = await userRepository.getById("user-123");
+    expect(storedUser?.gmail_oauth?.access_token).toMatch(/^gma1:/);
+    expect(storedUser?.gmail_oauth?.refresh_token).toMatch(/^gma1:/);
+  });
+
+  it("reports failure when both Gmail and SendGrid delivery fail", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "user-123",
+      email: "owner@example.com"
+    });
+
+    persistResearchPdf.mockResolvedValue({
+      status: "uploaded",
+      bucket: "test-bucket",
+      path: "reports/research-3/report.pdf",
+      storageUri: "gs://test-bucket/reports/research-3/report.pdf"
+    });
+
+    await userRepository.upsertGmailTokens(
+      "user-123",
+      {
+        access_token: "existing-access",
+        refresh_token: "existing-refresh"
+      },
+      {
+        email: "owner@example.com",
+        displayName: "Owner Example"
+      }
+    );
+
+    mockEmail.sendWithGmail.mockResolvedValue({
+      ok: false,
+      reason: "Invalid refresh token",
+      shouldInvalidateCredentials: true
+    });
+
+    mockEmail.sendWithSendgrid.mockResolvedValue({
+      ok: false,
+      reason: "SendGrid unavailable"
+    });
+
+    const seeded = await repository.create({
+      ownerUid: "user-123",
+      title: "Finalize Failure Test",
+      status: "completed",
+      dr: {
+        status: "success",
+        result: SAMPLE_OPENAI_RESULT
+      },
+      gemini: {
+        status: "success",
+        result: SAMPLE_GEMINI_RESULT
+      },
+      report: {}
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post(`/api/research/${seeded.id}/finalize`)
+      .set("Authorization", "Bearer integration-token")
+      .buffer(true)
+      .parse(binaryParser)
+      .expect(200);
+
+    expect(mockEmail.sendWithGmail).toHaveBeenCalledTimes(1);
+    expect(mockEmail.sendWithSendgrid).toHaveBeenCalledTimes(1);
+
+    expect(response.headers["x-email-status"]).toBe("failed");
+    expect(response.headers["x-email-provider"]).toBe("sendgrid");
+    expect(response.headers["x-email-error"]).toContain("Invalid refresh token");
+    expect(response.headers["x-email-error"]).toContain("SendGrid unavailable");
+
+    const updated = await repository.getById(seeded.id, { ownerUid: "user-123" });
+    expect(updated?.report.emailStatus).toBe("failed");
+    expect(updated?.report.emailError).toContain("Invalid refresh token");
+    expect(updated?.report.emailError).toContain("SendGrid unavailable");
+
+    const storedUser = await userRepository.getById("user-123");
+    expect(storedUser?.gmail_oauth).toBeUndefined();
   });
 });

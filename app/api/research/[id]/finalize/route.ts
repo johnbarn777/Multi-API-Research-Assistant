@@ -33,6 +33,16 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (result.pdfPath) {
       headers.set("X-Report-Pdf-Path", result.pdfPath);
     }
+    if (result.emailResult) {
+      headers.set("X-Email-Status", result.emailResult.status);
+      headers.set("X-Email-Provider", result.emailResult.provider);
+      if (result.emailResult.messageId) {
+        headers.set("X-Email-Message-Id", result.emailResult.messageId);
+      }
+      if (result.emailResult.errorMessage) {
+        headers.set("X-Email-Error", result.emailResult.errorMessage);
+      }
+    }
 
     return new NextResponse(result.pdfBuffer, {
       status: 200,

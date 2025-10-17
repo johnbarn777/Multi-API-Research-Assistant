@@ -443,4 +443,95 @@ test.describe("Research flow", () => {
     const body = await response.body();
     expect(body.subarray(0, 4).toString("ascii")).toBe("%PDF");
   });
+
+  test("shows email delivery success banner on research detail page", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    const researchId = "research-e2e-email-success";
+    const timestamp = new Date("2024-01-03T00:00:00.000Z").toISOString();
+
+    const researchPayload = {
+      id: researchId,
+      ownerUid: "e2e-user",
+      title: "Email Delivery Success",
+      status: "completed",
+      dr: {
+        status: "success"
+      },
+      gemini: {
+        status: "success"
+      },
+      report: {
+        emailStatus: "sent",
+        emailedTo: "user@example.com",
+        emailError: null
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    await page.route(`**/api/research/${researchId}`, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ item: researchPayload })
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(`/research/${researchId}`);
+
+    await expect(page.getByText("Email sent")).toBeVisible();
+    await expect(page.getByText(/Report emailed to user@example\.com/i)).toBeVisible();
+  });
+
+  test("shows email failure banner on research detail page", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    const researchId = "research-e2e-email-failure";
+    const timestamp = new Date("2024-01-04T00:00:00.000Z").toISOString();
+
+    const researchPayload = {
+      id: researchId,
+      ownerUid: "e2e-user",
+      title: "Email Delivery Failure",
+      status: "completed",
+      dr: {
+        status: "success"
+      },
+      gemini: {
+        status: "success"
+      },
+      report: {
+        emailStatus: "failed",
+        emailedTo: "user@example.com",
+        emailError: "SendGrid unavailable"
+      },
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    await page.route(`**/api/research/${researchId}`, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ item: researchPayload })
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto(`/research/${researchId}`);
+
+    await expect(page.getByText("Email failed")).toBeVisible();
+    await expect(
+      page.getByText(/We couldn't deliver the email automatically/i)
+    ).toBeVisible();
+    await expect(page.getByText(/Reason: SendGrid unavailable/i)).toBeVisible();
+  });
 });

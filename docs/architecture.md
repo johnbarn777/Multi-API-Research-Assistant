@@ -6,7 +6,7 @@
 2. **Research Creation** – Client calls `/api/research` to create a Firestore document (defaults to `awaiting_refinements`, immediately transitions to `refining` when the provider returns questions) and start the OpenAI Deep Research session.
 3. **Refinement Loop** – UI surfaces one question at a time. Answers are posted to `/api/research/:id/openai/answer`, which now persists `{index, answer}` pairs, appends provider follow-ups, and transitions the research to `ready_to_run` once `finalPrompt` arrives. The client uses `hydrateRefinementState` (server action) plus the `RefinementQA` component to retain local drafts across navigation while the state machine advances.
 4. **Parallel Execution** – `/api/research/:id/run` (`scheduleResearchRun`) transitions the doc to `running`, then kicks off OpenAI Deep Research and Gemini in parallel using `Promise.all`. Each provider sets its own `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as it settles so partial success is recorded. The research status flips to `completed` when at least one provider succeeds; otherwise it becomes `failed`.
-5. **Finalization** – `/api/research/:id/finalize` builds the comparative PDF via `pdf-lib`, persists it to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is available (otherwise exposes an in-memory `buffer://` path), and records `report.pdfPath` for downstream actions. Email delivery will hook in on top of this artefact in the next commit.
+5. **Finalization** – `/api/research/:id/finalize` builds the comparative PDF via `pdf-lib`, persists it to Firebase Storage when `FIREBASE_STORAGE_BUCKET` is available (otherwise exposes an in-memory `buffer://` path), records `report.pdfPath`, then invokes `sendResearchReportEmail`. The email orchestrator refreshes Gmail OAuth tokens when possible, falls back to SendGrid on authentication/network failures, and stamps `report.emailStatus`, `report.emailedTo`, and `report.emailError` accordingly so the UI can surface delivery banners immediately.
 
 ## Directory Responsibilities
 
@@ -32,6 +32,7 @@
 - `AuthProvider` mirrors refreshed ID tokens into a `firebaseToken` cookie (1-hour max-age, `SameSite=Strict`) so middleware can authenticate soft navigations without extra API calls.
 - `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` after success.
 - Local development can opt into a synthetic session by setting `DEV_AUTH_BYPASS=true` (and optional UID/email overrides). When active in non-production environments, the middleware injects those headers without hitting Firebase so `pnpm dev` can render authenticated pages.
+- A global `AppHeader` client component renders on every route, surfacing the current auth state via `UserMenu`. This control shows the signed-in user (name/email/avatar when available), provides a direct link back to `/sign-in` when unauthenticated, and invokes Firebase `signOut` before redirecting to `/sign-in` so demo sessions can be closed explicitly.
 
 ## Data Access Layer
 
@@ -71,5 +72,5 @@
 - Verify Firebase Auth session validation end-to-end against the deployed Firestore rules.
 - Integrate OpenAI Deep Research & Gemini using provider utilities.
 - Continue iterating on PDF layout polish (typography, spacing, optional tables) in `src/lib/pdf/builder.ts`.
-- Build resilient email delivery with Gmail + SendGrid fallback.
+- Monitor Gmail + SendGrid delivery telemetry and tune retry thresholds as we collect production data.
 - Add full coverage tests referencing requirement matrix in the project brief.
