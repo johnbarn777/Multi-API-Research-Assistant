@@ -122,7 +122,7 @@ export async function sendResearchReportEmail(
       pdfBuffer: input.pdfBuffer,
       filename: input.filename,
       tokens: gmailTokens,
-      from: input.to
+      ...(user?.email ? { from: user.email } : {})
     });
 
     if (gmailAttempt.ok) {
