@@ -80,7 +80,13 @@ describe("middleware", () => {
     const response = await middleware(request);
 
     expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    const payload = await response.json();
+    expect(payload).toMatchObject({
+      code: "auth.unauthorized",
+      message: "Unauthorized"
+    });
+    expect(typeof payload.requestId).toBe("string");
+    expect(response.headers.get("x-request-id")).toBe(payload.requestId);
     expect(verifyFirebaseIdToken).not.toHaveBeenCalled();
   });
 

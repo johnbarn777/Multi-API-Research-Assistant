@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
 import { finalizeResearch } from "@/server/research/finalize";
 import { logger } from "@/lib/utils/logger";
+import { jsonError } from "@/server/http/jsonError";
+import { resolveRequestId, withRequestId } from "@/server/http/requestContext";
 
 type Params = {
   params: {
@@ -11,16 +13,18 @@ type Params = {
 };
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const sessionOrResponse = ensureAuthenticated(request, "Authentication required");
+  const requestId = resolveRequestId(request.headers);
+  const sessionOrResponse = ensureAuthenticated(request, "Authentication required", requestId);
   if (sessionOrResponse instanceof NextResponse) {
-    return sessionOrResponse;
+    return withRequestId(sessionOrResponse, requestId);
   }
 
   try {
     const result = await finalizeResearch({
       researchId: params.id,
       ownerUid: sessionOrResponse.uid,
-      userEmail: sessionOrResponse.email
+      userEmail: sessionOrResponse.email,
+      requestId
     });
 
     const headers = new Headers({
@@ -44,24 +48,35 @@ export async function POST(request: NextRequest, { params }: Params) {
       }
     }
 
-    return new NextResponse(result.pdfBuffer, {
+    const response = new NextResponse(result.pdfBuffer as unknown as BodyInit, {
       status: 200,
       headers
     });
+    return withRequestId(response, requestId);
   } catch (error) {
     if (error instanceof Error && "statusCode" in error) {
       const status = (error as { statusCode: number }).statusCode;
-      return NextResponse.json({ error: error.message }, { status });
+      return jsonError({
+        code: "research.finalize.invalid_state",
+        message: error.message,
+        status,
+        requestId,
+        meta: { researchId: params.id }
+      });
     }
 
     logger.error("api.research.finalize.unexpected", {
       researchId: params.id,
+      requestId,
       error: error instanceof Error ? error.message : String(error)
     });
 
-    return NextResponse.json(
-      { error: "Failed to generate research PDF" },
-      { status: 502 }
-    );
+    return jsonError({
+      code: "research.finalize.unexpected",
+      message: "Failed to generate research PDF",
+      status: 502,
+      requestId,
+      meta: { researchId: params.id }
+    });
   }
 }

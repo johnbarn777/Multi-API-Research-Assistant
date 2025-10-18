@@ -18,8 +18,8 @@ export async function buildResearchPdf(payload: PdfPayload): Promise<Uint8Array>
   const margin = 56;
 
   let currentPage: PDFPage;
-  let cursorY: number;
-  let contentWidth: number;
+  let cursorY = 0;
+  let contentWidth = 0;
 
   const setCurrentPage = (page: PDFPage) => {
     currentPage = page;

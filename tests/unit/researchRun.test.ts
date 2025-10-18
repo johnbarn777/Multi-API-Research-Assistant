@@ -2,6 +2,9 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { scheduleResearchRun } from "@/server/research/run";
 import {
   setResearchRepository,
+  type CreateResearchInput,
+  type ListResearchOptions,
+  type PaginatedResearchResult,
   type ResearchRepository,
   type UpdateResearchInput
 } from "@/server/repositories/researchRepository";
@@ -53,7 +56,7 @@ class StubResearchRepository implements ResearchRepository {
     return Timestamp.fromMillis(this.currentTime);
   }
 
-  async create() {
+  async create(_input: CreateResearchInput): Promise<Research> {
     throw new Error("Not implemented in stub");
   }
 
@@ -83,7 +86,10 @@ class StubResearchRepository implements ResearchRepository {
     return id === this.research.id ? this.research : null;
   }
 
-  async listByOwner() {
+  async listByOwner(
+    _ownerUid: string,
+    _options?: ListResearchOptions
+  ): Promise<PaginatedResearchResult> {
     throw new Error("Not implemented in stub");
   }
 }

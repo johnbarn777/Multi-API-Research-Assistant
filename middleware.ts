@@ -5,8 +5,10 @@ import {
   AUTH_HEADER_TOKEN,
   AUTH_HEADER_UID
 } from "@/server/auth/session";
+import { jsonError } from "@/server/http/jsonError";
+import { resolveRequestId, withRequestId } from "@/server/http/requestContext";
 
-const PUBLIC_PATHS = ["/", "/sign-in", "/api/auth/session"];
+const PUBLIC_PATHS = ["/sign-in", "/api/auth/session"];
 const SESSION_COOKIES = ["__session", "session", "firebaseToken"];
 
 function parseBooleanFlag(value: string | undefined | null): boolean {
@@ -79,13 +81,24 @@ function getTokenFromRequest(request: NextRequest): string | null {
 }
 
 function unauthorizedResponse(request: NextRequest) {
+  const requestId = resolveRequestId(request.headers);
+
   if (isApiRoute(request.nextUrl.pathname)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const response = jsonError({
+      code: "auth.unauthorized",
+      message: "Unauthorized",
+      status: 401,
+      requestId
+    });
+
+    return withRequestId(response, requestId);
   }
 
   const redirectUrl = new URL("/sign-in", request.url);
   redirectUrl.searchParams.set("redirectedFrom", request.nextUrl.pathname);
-  return NextResponse.redirect(redirectUrl, 302);
+  const redirectResponse = NextResponse.redirect(redirectUrl, 302);
+  redirectResponse.headers.set("X-Request-Id", requestId);
+  return redirectResponse;
 }
 
 export async function middleware(request: NextRequest) {

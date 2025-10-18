@@ -17,6 +17,7 @@ interface FinalizeResearchInput {
   researchId: string;
   ownerUid: string;
   userEmail?: string | null;
+  requestId?: string;
 }
 
 export interface FinalizeResearchResult {
@@ -66,7 +67,8 @@ function slugifyTitle(title: string): string {
 export async function finalizeResearch({
   researchId,
   ownerUid,
-  userEmail
+  userEmail,
+  requestId
 }: FinalizeResearchInput): Promise<FinalizeResearchResult> {
   const repository: ResearchRepository = getResearchRepository();
 
@@ -86,7 +88,8 @@ export async function finalizeResearch({
 
   logger.info("research.finalize.start", {
     researchId,
-    ownerUid
+    ownerUid,
+    requestId
   });
 
   const pdfBytes = await buildResearchPdf({
@@ -111,7 +114,7 @@ export async function finalizeResearch({
     {
       report: {
         ...research.report,
-        pdfPath: storageResult.path ?? null
+        pdfPath: storageResult.path ?? undefined
       }
     },
     { ownerUid }
@@ -120,6 +123,7 @@ export async function finalizeResearch({
   logger.info("research.finalize.completed", {
     researchId,
     ownerUid,
+    requestId,
     storageStatus: storageResult.status,
     pdfPath: storageResult.path
   });
@@ -134,7 +138,8 @@ export async function finalizeResearch({
         to: userEmail,
         title: research.title,
         filename,
-        pdfBuffer
+        pdfBuffer,
+        requestId
       });
     } catch (error) {
       const reason =
@@ -143,6 +148,7 @@ export async function finalizeResearch({
       logger.error("research.finalize.email_unexpected", {
         researchId,
         ownerUid,
+        requestId,
         error: reason
       });
 

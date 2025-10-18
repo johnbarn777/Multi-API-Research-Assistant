@@ -533,7 +533,7 @@ describe("POST /api/research/:id/finalize", () => {
       .parse(binaryParser)
       .expect(200);
 
-    expect(mockEmail.sendWithGmail).toHaveBeenCalledTimes(1);
+    expect(mockEmail.sendWithGmail).toHaveBeenCalledTimes(2);
     expect(mockEmail.sendWithSendgrid).toHaveBeenCalledTimes(1);
 
     expect(response.headers["x-email-status"]).toBe("sent");
