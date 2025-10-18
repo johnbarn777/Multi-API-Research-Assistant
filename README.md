@@ -107,7 +107,7 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 
 ## Implementation Roadmap
 
-- **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope.
+- **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope. `DEV_AUTH_BYPASS` defaults to `false`; only toggle it on intentionally when you cannot obtain real tokens locally.
 - **Firestore:** Replace stubbed responses with Firestore reads/writes, enforce ownership checks per requirement.
 - **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openaiDeepResearch.ts`.
 - **Gemini:** Wire `generateContent` to invoke the appropriate Gemini model (with polling when required) and normalize the output.
