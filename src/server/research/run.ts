@@ -14,6 +14,8 @@ import {
   type ResearchRepository
 } from "@/server/repositories/researchRepository";
 import type { ProviderResult, Research, ResearchProviderState } from "@/types/research";
+import { finalizeResearch } from "@/server/research/finalize";
+import { getUserRepository } from "@/server/repositories/userRepository";
 
 type ProviderKind = "openai" | "gemini";
 
@@ -42,6 +44,7 @@ type ProviderOutcome = ProviderOutcomeSuccess | ProviderOutcomeFailure;
 interface ScheduleResearchRunInput {
   researchId: string;
   ownerUid: string;
+  userEmail?: string | null;
   requestId?: string;
 }
 
@@ -297,7 +300,8 @@ async function executeProviders({
   finalPrompt,
   requestId,
   topic,
-  answers
+  answers,
+  fallbackEmail
 }: {
   repository: ResearchRepository;
   researchId: string;
@@ -307,6 +311,7 @@ async function executeProviders({
   requestId?: string;
   topic: string;
   answers: Array<{ index: number; answer: string }>;
+  fallbackEmail?: string | null;
 }): Promise<void> {
   let openAiOutcome: ProviderOutcome | null = null;
   let geminiOutcome: ProviderOutcome | null = null;
@@ -413,13 +418,45 @@ async function executeProviders({
       error: error instanceof Error ? error.message : String(error)
     });
   }
+
+  if (finalStatus === "completed") {
+    const userRepository = getUserRepository();
+
+    try {
+      const user = await userRepository.getById(ownerUid);
+      const normalizedSessionEmail =
+        typeof fallbackEmail === "string" && fallbackEmail.trim().length > 0
+          ? fallbackEmail.trim()
+          : null;
+      const normalizedProfileEmail =
+        user?.email && user.email.trim().length > 0 ? user.email.trim() : null;
+      const emailForFinalize = normalizedProfileEmail ?? normalizedSessionEmail ?? null;
+
+      await finalizeResearch({
+        researchId,
+        ownerUid,
+        userEmail: emailForFinalize,
+        fallbackEmail: normalizedSessionEmail,
+        requestId
+      });
+    } catch (error) {
+      logger.error("research.run.auto_finalize_failed", {
+        researchId,
+        ownerUid,
+        requestId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
 }
 
 export async function scheduleResearchRun({
   researchId,
   ownerUid,
+  userEmail,
   requestId
 }: ScheduleResearchRunInput): Promise<ScheduleResearchRunResult> {
+  const sessionEmail = userEmail ? String(userEmail).trim() : null;
   const repository = getResearchRepository();
   const research = await repository.getById(researchId, { ownerUid });
 
@@ -500,7 +537,8 @@ export async function scheduleResearchRun({
     finalPrompt,
     requestId,
     topic: research.title,
-    answers: research.dr.answers ?? []
+    answers: research.dr.answers ?? [],
+    fallbackEmail: sessionEmail
   }).catch((error) => {
     logger.error("research.run.unhandled_error", {
       researchId,

@@ -1,6 +1,7 @@
 import { buildResearchPdf } from "@/lib/pdf/builder";
 import { persistResearchPdf } from "@/lib/pdf/storage";
 import { logger } from "@/lib/utils/logger";
+import { isDemoMode } from "@/config/features";
 import {
   sendResearchReportEmail,
   type SendResearchReportResult
@@ -17,6 +18,7 @@ interface FinalizeResearchInput {
   researchId: string;
   ownerUid: string;
   userEmail?: string | null;
+  fallbackEmail?: string | null;
   requestId?: string;
 }
 
@@ -68,6 +70,7 @@ export async function finalizeResearch({
   researchId,
   ownerUid,
   userEmail,
+  fallbackEmail,
   requestId
 }: FinalizeResearchInput): Promise<FinalizeResearchResult> {
   const repository: ResearchRepository = getResearchRepository();
@@ -84,7 +87,20 @@ export async function finalizeResearch({
   }
 
   const createdAtIso = resolveCreatedAt(research.createdAt);
-  const emailForReport = userEmail ?? "unknown@user";
+  const normalizedUserEmail =
+    typeof userEmail === "string" && userEmail.trim().length > 0 ? userEmail.trim() : "";
+  const normalizedFallbackEmail =
+    typeof fallbackEmail === "string" && fallbackEmail.trim().length > 0 ? fallbackEmail.trim() : "";
+  const normalizedStoredEmail =
+    typeof research.report?.emailedTo === "string" && research.report.emailedTo.trim().length > 0
+      ? research.report.emailedTo.trim()
+      : "";
+  const demoMode = isDemoMode();
+  const fallbackDemoEmail = demoMode ? `demo-user+${ownerUid}@example.com` : null;
+  const resolvedEmail =
+    normalizedUserEmail || normalizedFallbackEmail || normalizedStoredEmail || fallbackDemoEmail || null;
+  const emailForReport =
+    (resolvedEmail ?? normalizedFallbackEmail ?? normalizedStoredEmail) || "unknown@user";
 
   logger.info("research.finalize.start", {
     researchId,
@@ -130,12 +146,12 @@ export async function finalizeResearch({
 
   let emailResult: SendResearchReportResult | null = null;
 
-  if (userEmail) {
+  if (resolvedEmail) {
     try {
       emailResult = await sendResearchReportEmail({
         researchId,
         ownerUid,
-        to: userEmail,
+        to: resolvedEmail,
         title: research.title,
         filename,
         pdfBuffer,
@@ -156,7 +172,7 @@ export async function finalizeResearch({
         researchId,
         {
           report: {
-            emailedTo: userEmail,
+            emailedTo: resolvedEmail,
             emailStatus: "failed",
             emailError: reason
           }

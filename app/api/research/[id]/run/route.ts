@@ -24,6 +24,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     const { research, alreadyRunning } = await scheduleResearchRun({
       researchId: params.id,
       ownerUid: sessionOrResponse.uid,
+      userEmail: sessionOrResponse.email,
       requestId
     });
 

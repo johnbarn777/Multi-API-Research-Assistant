@@ -104,6 +104,41 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
 
 Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is resolved server-side via the typed env helpers in `src/config/env.ts`.
 
+### Demo Mode (No Live Providers)
+
+When you need to demo the full workflow without real OpenAI/Gemini keys, flip `DEMO_MODE=true`. Provider calls, PDF/email delivery, and storage writes fall back to deterministic fixtures so Firestore state transitions, UI progress, and finalized reports all behave exactly as production—just without touching external APIs.
+
+- Populate every required variable with harmless placeholder values that satisfy the validators (URLs must be well-formed, emails must look like emails, and `TOKEN_ENCRYPTION_KEY` must be a 32-byte base64 string). Example:
+
+  ```env
+  # .env.local or Vercel preview/prod environment
+  DEMO_MODE=true
+  FIREBASE_PROJECT_ID=demo-project
+  FIREBASE_CLIENT_EMAIL=demo-service-account@example.com
+  FIREBASE_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n
+  OPENAI_API_KEY=demo-openai-key
+  OPENAI_DR_BASE_URL=https://demo.openai.local
+  GEMINI_API_KEY=demo-gemini-key
+  GEMINI_BASE_URL=https://demo.gemini.local
+  GEMINI_MODEL=demo-model
+  GOOGLE_OAUTH_CLIENT_ID=demo-google-client
+  GOOGLE_OAUTH_CLIENT_SECRET=demo-google-secret
+  GOOGLE_OAUTH_REDIRECT_URI=https://demo.app.local/oauth
+  GOOGLE_OAUTH_SCOPES=email
+  TOKEN_ENCRYPTION_KEY=ZNbb2KctfRPyl3MGqyG4PbnWVr7hKkxvxQ3T6HTLJmA=
+  FROM_EMAIL=demo-user@example.com
+  APP_BASE_URL=http://localhost:3000
+  NEXT_PUBLIC_FIREBASE_API_KEY=demo-web-key
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-app.firebaseapp.com
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-project
+  NEXT_PUBLIC_FIREBASE_APP_ID=demo-web-app
+  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-DEMO12345
+  ```
+
+- For Vercel, add the same entries under **Settings → Environment Variables** (enable them for Preview and Production). You can keep `DEMO_MODE=false` for the production project that uses real provider credentials while leaving it `true` for previews/local runs.
+- Firebase Admin still needs a service account even in demo mode; you can upload a non-sensitive emulator key or a stripped-down service account that only hits local emulators.
+- With the placeholders above in place, `pnpm dev` renders the research flow end-to-end, and `/api/research/[id]/run` no longer throws Firestore validation errors because provider state is reset without undefined fields.
+
 ### Firebase Emulator Usage
 
 - Copy `.env.example` to `.env.local` and populate values; the same service account can be reused for emulator runs.

@@ -248,7 +248,7 @@ Query: `?cursor=<ts|docId>`
 Side effects:
 
 * Updates `research.report.pdfPath` with the returned path.
-* Leaves report email status untouched (email delivery handled in Commit 9).
+* Invokes the report email pipeline (Commit 9), recording `emailStatus`/`emailError` and falling back to the session email (or a deterministic demo recipient) when the user profile lacks one.
 
 ---
 
@@ -265,6 +265,7 @@ Side effects:
   * `RefinementQA` (question, textarea, back/next)
   * `ProviderProgress` (OpenAI/Gemini status: idle/queued/running/success/failure; summaries, tokens, timestamps)
   * `Toasts` for errors
+  * Retry affordances: `Start Refinement` exposes a retry button after failures, the research detail page offers a `Retry run` control when provider execution fails, and the final report card exposes `Retry email delivery` when the previous attempt errored or is stuck in `queued`.
 * **Responsive:** Mobile-first; single-column; min tap targets 44px; dashboard verified at 375px width with no horizontal scroll.
 * **Empty States:** Helpful copy; guide to create first research.
 * **Accessibility:** Labels for inputs, semantic headings, focus ring, skip link to main content, and axe-core audits on dashboard/detail flows.

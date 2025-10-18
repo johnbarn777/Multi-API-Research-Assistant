@@ -105,19 +105,84 @@ const researchConverter: FirestoreDataConverter<Research> = {
 };
 
 function mergeProviderState(
-  current: ResearchProviderState,
+  current: ResearchProviderState | undefined,
   patch?: ResearchProviderState
 ): ResearchProviderState {
-  if (!patch) {
-    return current;
+  const currentQuestions = Array.isArray(current?.questions) ? current?.questions : [];
+  const currentAnswers = Array.isArray(current?.answers) ? current?.answers : [];
+
+  const normalizedCurrent: ResearchProviderState = {
+    status: current?.status ?? "idle",
+    error: current?.error ?? null,
+    questions: [...currentQuestions],
+    answers: [...currentAnswers]
+  };
+
+  if (typeof current?.sessionId === "string" && current.sessionId.trim().length > 0) {
+    normalizedCurrent.sessionId = current.sessionId;
   }
 
-  return {
-    ...current,
-    ...patch,
-    questions: patch.questions ?? current.questions,
-    answers: patch.answers ?? current.answers
+  if (typeof current?.jobId === "string" && current.jobId.trim().length > 0) {
+    normalizedCurrent.jobId = current.jobId;
+  }
+
+  if (
+    typeof current?.finalPrompt === "string" &&
+    current.finalPrompt.trim().length > 0
+  ) {
+    normalizedCurrent.finalPrompt = current.finalPrompt;
+  }
+
+  if (current?.result !== undefined) {
+    normalizedCurrent.result = current.result;
+  }
+
+  if (typeof current?.durationMs === "number" && Number.isFinite(current.durationMs)) {
+    normalizedCurrent.durationMs = current.durationMs;
+  }
+
+  if (typeof current?.startedAt === "string" && current.startedAt.length > 0) {
+    normalizedCurrent.startedAt = current.startedAt;
+  }
+
+  if (typeof current?.completedAt === "string" && current.completedAt.length > 0) {
+    normalizedCurrent.completedAt = current.completedAt;
+  }
+
+  if (!patch) {
+    return normalizedCurrent;
+  }
+
+  const normalizedPatch: Partial<ResearchProviderState> = {};
+  const keysToUnset = new Set<keyof ResearchProviderState>();
+
+  (Object.keys(patch) as Array<keyof ResearchProviderState>).forEach((key) => {
+    const value = patch[key];
+
+    if (value === undefined) {
+      keysToUnset.add(key);
+      return;
+    }
+
+    (normalizedPatch as Record<keyof ResearchProviderState, unknown>)[key] = value;
+  });
+
+  const merged: ResearchProviderState = {
+    ...normalizedCurrent,
+    ...normalizedPatch,
+    questions:
+      normalizedPatch.questions !== undefined
+        ? normalizedPatch.questions
+        : normalizedCurrent.questions,
+    answers:
+      normalizedPatch.answers !== undefined ? normalizedPatch.answers : normalizedCurrent.answers
   };
+
+  keysToUnset.forEach((key) => {
+    delete (merged as Record<keyof ResearchProviderState, unknown>)[key];
+  });
+
+  return merged;
 }
 
 function sanitizeLimit(limit?: number): number {

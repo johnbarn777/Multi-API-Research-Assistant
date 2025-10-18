@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, afterAll, describe, expect, it, vi } from "vitest";
 import { scheduleResearchRun } from "@/server/research/run";
 import {
   setResearchRepository,
@@ -9,6 +9,7 @@ import {
   type UpdateResearchInput
 } from "@/server/repositories/researchRepository";
 import type { Research, ResearchProviderState } from "@/types/research";
+import { resetEnvCache } from "@/config/env";
 import { Timestamp } from "firebase-admin/firestore";
 
 const mockOpenAi = vi.hoisted(() => ({
@@ -23,9 +24,54 @@ const mockGemini = vi.hoisted(() => ({
 vi.mock("@/lib/providers/openaiDeepResearch", () => mockOpenAi);
 vi.mock("@/lib/providers/gemini", () => mockGemini);
 
+const mockFinalize = vi.hoisted(() => ({
+  finalizeResearch: vi.fn()
+}));
+
+const mockUserRepository = vi.hoisted(() => ({
+  getById: vi.fn()
+}));
+
+vi.mock("@/server/research/finalize", () => mockFinalize);
+
+vi.mock("@/server/repositories/userRepository", () => ({
+  getUserRepository: () => mockUserRepository
+}));
+
 const executeRun = mockOpenAi.executeRun;
 const pollResult = mockOpenAi.pollResult;
 const generateContent = mockGemini.generateContent;
+
+const REQUIRED_ENV = {
+  FIREBASE_PROJECT_ID: "test-project",
+  FIREBASE_CLIENT_EMAIL: "test@example.com",
+  FIREBASE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nFAKE\\n-----END PRIVATE KEY-----\\n",
+  OPENAI_API_KEY: "openai-test-key",
+  OPENAI_DR_BASE_URL: "https://example.com/openai",
+  GEMINI_API_KEY: "gemini-test-key",
+  GEMINI_BASE_URL: "https://example.com/gemini",
+  GEMINI_MODEL: "gemini-test-model",
+  GOOGLE_OAUTH_CLIENT_ID: "google-client",
+  GOOGLE_OAUTH_CLIENT_SECRET: "google-secret",
+  GOOGLE_OAUTH_REDIRECT_URI: "https://example.com/oauth",
+  GOOGLE_OAUTH_SCOPES: "email",
+  TOKEN_ENCRYPTION_KEY: "ZNbb2KctfRPyl3MGqyG4PbnWVr7hKkxvxQ3T6HTLJmA=",
+  FROM_EMAIL: "demo@example.com",
+  APP_BASE_URL: "https://example.com/app",
+  NEXT_PUBLIC_FIREBASE_API_KEY: "next-api-key",
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "example.firebaseapp.com",
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: "test-project",
+  NEXT_PUBLIC_FIREBASE_APP_ID: "next-app-id",
+  NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: "G-TEST123",
+  DEMO_MODE: "false"
+} as const;
+
+function applyTestEnv(overrides: Record<string, string> = {}) {
+  resetEnvCache();
+  Object.entries({ ...REQUIRED_ENV, ...overrides }).forEach(([key, value]) => {
+    process.env[key] = value;
+  });
+}
 
 function mergeProviderState(
   current: ResearchProviderState,
@@ -120,10 +166,37 @@ function baseResearch(): Research {
 }
 
 describe("scheduleResearchRun", () => {
+  beforeAll(() => {
+    applyTestEnv();
+  });
+
+  afterAll(() => {
+    resetEnvCache();
+  });
+
   beforeEach(() => {
     executeRun.mockReset();
     pollResult.mockReset();
     generateContent.mockReset();
+    mockFinalize.finalizeResearch.mockReset();
+    mockUserRepository.getById.mockReset();
+
+    mockFinalize.finalizeResearch.mockResolvedValue({
+      pdfBuffer: Buffer.from("demo"),
+      pdfPath: null,
+      storageStatus: "skipped",
+      openAi: null,
+      gemini: null,
+      filename: "demo.pdf",
+      emailResult: {
+        status: "sent",
+        provider: "demo",
+        messageId: "demo"
+      }
+    });
+    mockUserRepository.getById.mockResolvedValue({
+      email: "user@example.com"
+    });
   });
 
   afterEach(() => {
@@ -153,7 +226,8 @@ describe("scheduleResearchRun", () => {
 
     const result = await scheduleResearchRun({
       researchId: "research-1",
-      ownerUid: "user-123"
+      ownerUid: "user-123",
+      userEmail: "user@example.com"
     });
 
     expect(result.alreadyRunning).toBe(false);
@@ -169,6 +243,59 @@ describe("scheduleResearchRun", () => {
     expect(stored.dr.result).toEqual(openAiResult);
     expect(stored.gemini.status).toBe("success");
     expect(stored.gemini.result).toEqual(geminiResult);
+    expect(mockUserRepository.getById).toHaveBeenCalledWith("user-123");
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledTimes(1);
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchId: "research-1",
+        ownerUid: "user-123",
+        userEmail: "user@example.com",
+        fallbackEmail: "user@example.com"
+      })
+    );
+  });
+
+  it("uses the session email when the user profile has no stored address", async () => {
+    const repository = new StubResearchRepository(baseResearch());
+    setResearchRepository(repository);
+
+    mockUserRepository.getById.mockReset();
+    mockUserRepository.getById.mockResolvedValue(null);
+
+    const openAiResult = {
+      raw: {},
+      summary: "OpenAI insights",
+      insights: ["Point A"],
+      meta: { model: "gpt-test", tokens: 123 }
+    };
+    const geminiResult = {
+      raw: {},
+      summary: "Gemini findings",
+      insights: ["Observation"],
+      meta: { model: "gemini-pro", tokens: 456 }
+    };
+
+    executeRun.mockResolvedValue({ runId: "run-3", status: "queued", raw: {} });
+    pollResult.mockResolvedValue({ status: "completed", result: openAiResult, raw: {} });
+    generateContent.mockResolvedValue(geminiResult);
+
+    await scheduleResearchRun({
+      researchId: "research-1",
+      ownerUid: "user-123",
+      userEmail: "session@example.com"
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledTimes(1);
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchId: "research-1",
+        ownerUid: "user-123",
+        userEmail: "session@example.com",
+        fallbackEmail: "session@example.com"
+      })
+    );
   });
 
   it("marks research as completed when one provider fails and the other succeeds", async () => {
@@ -188,7 +315,8 @@ describe("scheduleResearchRun", () => {
 
     await scheduleResearchRun({
       researchId: "research-1",
-      ownerUid: "user-123"
+      ownerUid: "user-123",
+      userEmail: "user@example.com"
     });
 
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -198,6 +326,16 @@ describe("scheduleResearchRun", () => {
     expect(stored.dr.status).toBe("success");
     expect(stored.gemini.status).toBe("failure");
     expect(stored.gemini.error).toMatch(/Gemini service unavailable/);
+    expect(mockUserRepository.getById).toHaveBeenCalledWith("user-123");
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledTimes(1);
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        researchId: "research-1",
+        ownerUid: "user-123",
+        userEmail: "user@example.com",
+        fallbackEmail: "user@example.com"
+      })
+    );
   });
 
   it("fails when required execution context is missing", async () => {
@@ -209,7 +347,8 @@ describe("scheduleResearchRun", () => {
     await expect(
       scheduleResearchRun({
         researchId: "research-1",
-        ownerUid: "user-123"
+        ownerUid: "user-123",
+        userEmail: "user@example.com"
       })
     ).rejects.toMatchObject({ message: "Research does not have a final prompt to execute" });
   });

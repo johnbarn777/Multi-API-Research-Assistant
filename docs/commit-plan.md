@@ -129,6 +129,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Create orchestrator in `src/server/email/sendResearchReport.ts` selecting provider based on token validity, recording status and errors.~~ (Persists refreshed tokens, clears invalid grants, records `report.emailStatus`/`emailError`.)
 - ~~Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.~~ (`app/api/research/[id]/finalize/route.ts` now emits email headers.)
 - ~~Surface success/error toast/banners on research detail page once email attempt finishes.~~ (`app/research/[id]/page.tsx` shows success/failure banners leveraging `report.emailStatus`/`emailError`.)
+- Enhancement: Provider runs now trigger the finalize/email pipeline automatically once at least one provider reports success, pulling the owner’s email from the user profile so delivery happens without an extra manual API call. When no profile email is available the pipeline reuses the session email (or a deterministic demo fallback) so demo flows never stall on delivery.
 
 **Testing**
 - ~~Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.~~ (`tests/unit/email/gmail.test.ts`, `tests/unit/email/sendResearchReport.test.ts`)
@@ -143,6 +144,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Add empty state, loading skeletons, and responsive layout per UX requirements.~~
 - ~~Ensure routing from `/` to `/dashboard` post-login and sign-out flows.~~
 - Added a non-production `__dashboard_fixture` cookie override so E2E can supply fixture data to the server-rendered dashboard while keeping production behaviour untouched.
+- Latest: research detail page exposes inline retry buttons for provider runs and email delivery, and the creation form surfaces a retry affordance after failures so demo operators can recover without reloading.
 
 **Testing**
 - ~~Unit: Component snapshot/interaction tests verifying chips, empty states.~~
@@ -183,6 +185,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Provide deterministic refinement and provider fixture responses so the research state machine runs without OpenAI/Gemini calls.~~
 - ~~Short-circuit email + PDF storage when demo mode is active, emitting preview headers and preserving Firestore state.~~
 - ~~Document the flag, behaviour, and deployment notes across requirements and architecture docs.~~
+> Hardening: Provider state merges now drop `undefined` values before persisting so Firestore accepts demo runs even when placeholder credentials are used (prevents `dr.completedAt` undefined errors).
 
 **Testing**
 - Unit: `tests/unit/env.test.ts` updated to cover the new flag (not yet re-run in this work session).

@@ -21,9 +21,9 @@ export default function NewResearchPage() {
   const [title, setTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryRequested, setRetryRequested] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitResearch() {
     if (isSubmitting) {
       return;
     }
@@ -41,6 +41,7 @@ export default function NewResearchPage() {
 
     setIsSubmitting(true);
     setError(null);
+    setRetryRequested(false);
 
     try {
       const response = await createResearch({ token, title: trimmed });
@@ -54,9 +55,15 @@ export default function NewResearchPage() {
           ? caught.message
           : "Something went wrong while creating your research session.";
       setError(message);
+      setRetryRequested(true);
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitResearch();
   }
 
   async function updateDashboardCache(tokenValue: string, response: CreateResearchResponse) {
@@ -117,7 +124,19 @@ export default function NewResearchPage() {
               We automatically start an OpenAI Deep Research session and save the initial refinement questions for you.
             </p>
             {error ? (
-              <p className="text-sm text-red-400">{error}</p>
+              <div className="space-y-2">
+                <p className="text-sm text-red-400">{error}</p>
+                {retryRequested ? (
+                  <button
+                    type="button"
+                    onClick={() => submitResearch()}
+                    disabled={isSubmitting}
+                    className="inline-flex items-center rounded-md border border-red-500/60 px-3 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSubmitting ? "Retrying…" : "Retry"}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <div className="flex items-center gap-3">

@@ -55,6 +55,9 @@ export default function ResearchDetailPage() {
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [runSuccess, setRunSuccess] = useState<string | null>(null);
+  const [isRetryingEmail, setIsRetryingEmail] = useState(false);
+  const [emailRetryError, setEmailRetryError] = useState<string | null>(null);
+  const [emailRetrySuccess, setEmailRetrySuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!researchId) {
@@ -339,6 +342,60 @@ export default function ResearchDetailPage() {
     }
   };
 
+  const handleRetryEmail = async () => {
+    if (!researchId) {
+      return;
+    }
+
+    setIsRetryingEmail(true);
+    setEmailRetryError(null);
+    setEmailRetrySuccess(null);
+
+    try {
+      const headers: HeadersInit = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `/api/research/${encodeURIComponent(researchId)}/finalize`,
+        {
+          method: "POST",
+          headers
+        }
+      );
+
+      if (!response.ok) {
+        const detail =
+          response.headers.get("X-Email-Error") ?? "Failed to retry email delivery";
+        throw new Error(detail);
+      }
+
+      await response.arrayBuffer().catch(() => undefined);
+
+      const statusHeader = response.headers.get("X-Email-Status");
+      if (statusHeader && statusHeader.toLowerCase() === "failed") {
+        const detail =
+          response.headers.get("X-Email-Error") ?? "Email delivery failed";
+        throw new Error(detail);
+      }
+
+      if (statusHeader && statusHeader.toLowerCase() === "sent") {
+        setEmailRetrySuccess("Email sent successfully.");
+      } else {
+        setEmailRetrySuccess("Email queued. Status will refresh shortly.");
+      }
+
+      await mutate();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to retry email delivery";
+      setEmailRetryError(message);
+    } finally {
+      setIsRetryingEmail(false);
+    }
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-10 px-6 py-12">
       <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -439,6 +496,16 @@ export default function ResearchDetailPage() {
               {runHelperText ? (
                 <p className={`text-xs ${runError ? "text-rose-200" : "text-emerald-200"}`}>{runHelperText}</p>
               ) : null}
+              {runError ? (
+                <button
+                  type="button"
+                  onClick={handleStartRun}
+                  disabled={isStartingRun}
+                  className="inline-flex items-center rounded-md border border-rose-500/60 px-3 py-1 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isStartingRun ? "Retrying…" : "Retry run"}
+                </button>
+              ) : null}
             </div>
           </header>
           <pre className="max-h-64 overflow-auto rounded-md bg-slate-950/60 px-4 py-3 text-sm text-emerald-100">
@@ -477,6 +544,26 @@ export default function ResearchDetailPage() {
             The PDF is generating and will be emailed shortly. You will receive a confirmation once delivery
             completes.
           </div>
+        ) : null}
+        {emailRetrySuccess ? (
+          <div className="mb-4 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+            {emailRetrySuccess}
+          </div>
+        ) : null}
+        {emailRetryError ? (
+          <div className="mb-4 rounded-md border border-rose-500/60 bg-rose-500/10 p-4 text-sm text-rose-100">
+            {emailRetryError}
+          </div>
+        ) : null}
+        {emailStatus === "failed" || emailStatus === "queued" ? (
+          <button
+            type="button"
+            onClick={handleRetryEmail}
+            disabled={isRetryingEmail}
+            className="mb-4 inline-flex items-center rounded-md border border-slate-600 px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRetryingEmail ? "Retrying delivery…" : "Retry email delivery"}
+          </button>
         ) : null}
         <p className="text-sm text-slate-400">
           Once both providers complete, the system generates a PDF report and emails it to the user. This area

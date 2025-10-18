@@ -24,6 +24,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       researchId: params.id,
       ownerUid: sessionOrResponse.uid,
       userEmail: sessionOrResponse.email,
+      fallbackEmail: sessionOrResponse.email,
       requestId
     });
 
