@@ -1,5 +1,6 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { ForbiddenError } from "@/server/auth/session";
+import { canTransition } from "@/server/research/state-machine";
 import type {
   Research,
   ResearchProviderState,
@@ -81,15 +82,6 @@ export class InvalidPaginationCursorError extends Error {
 
 const MAX_PAGE_SIZE = 50;
 const DEFAULT_PAGE_SIZE = 20;
-
-const allowedTransitions: Record<ResearchStatus, ReadonlySet<ResearchStatus>> = {
-  awaiting_refinements: new Set(["refining", "ready_to_run", "failed"]),
-  refining: new Set(["ready_to_run", "failed"]),
-  ready_to_run: new Set(["running", "failed"]),
-  running: new Set(["completed", "failed"]),
-  completed: new Set(),
-  failed: new Set()
-};
 
 const researchConverter: FirestoreDataConverter<Research> = {
   toFirestore(research: Research) {
@@ -216,19 +208,6 @@ function decodeCursor(cursor: string): { createdAt: number; id: string } {
   }
 }
 
-function assertValidTransition(current: ResearchStatus, next: ResearchStatus) {
-  if (current === next) {
-    return;
-  }
-
-  const allowed = allowedTransitions[current];
-  if (!allowed || !allowed.has(next)) {
-    throw new InvalidResearchStateError(
-      `Cannot transition research from ${current} to ${next}`
-    );
-  }
-}
-
 export class FirestoreResearchRepository implements ResearchRepository {
   private readonly collection: CollectionReference<Research>;
   private readonly now: () => Timestamp;
@@ -299,8 +278,12 @@ export class FirestoreResearchRepository implements ResearchRepository {
         throw new ForbiddenError("You do not have access to this research");
       }
 
-      if (update.status) {
-        assertValidTransition(current.status, update.status);
+      if (update.status && current.status !== update.status) {
+        if (!canTransition(current.status, update.status)) {
+          throw new InvalidResearchStateError(
+            `Cannot transition research from ${current.status} to ${update.status}`
+          );
+        }
       }
 
       const now = this.now();
