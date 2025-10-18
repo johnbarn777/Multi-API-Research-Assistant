@@ -574,12 +574,14 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * AC1: `src/config/env.ts` validates required server vs client variables separately and fails fast on missing/invalid values.
 * AC2: `TOKEN_ENCRYPTION_KEY` must be a 32-byte base64 string used to decrypt Gmail OAuth payloads.
 * AC3: Gmail OAuth tokens can be round-tripped via AES-256-GCM helpers in `src/lib/security/crypto.ts`.
+* AC4: Setting `DEMO_MODE=true` disables live provider/email/storage integrations in favour of deterministic fixtures for demos; defaults to `false`.
 * Note: `NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID` is optional and only required when Firebase Analytics is enabled.
 
 **Unit**
 
 * UT1: `tests/unit/env.test.ts` covers happy-path parsing and missing variable failures.
 * UT2: `tests/unit/crypto.test.ts` exercises encrypt/decrypt round-trip with sample key.
+* UT3: `tests/unit/env.test.ts` asserts boolean parsing for `DEMO_MODE`.
 
 **Integration**
 
@@ -638,6 +640,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * **Provider normalization**: Map provider responses into `ProviderResult` via `src/lib/providers/normalizers.ts` so downstream consumers have a consistent shape.
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
+* **Demo mode**: Flip `DEMO_MODE=true` to drive the entire flow with fixture data—refinement questions, provider summaries, email delivery (console preview), and PDF storage bypass—while still exercising the UI and persistence paths. Finalize responses expose `X-Email-Preview-Base64` so demos can surface the mocked email copy.
 * **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).
 * **Dev Auth Bypass**: Local developers blocked on Firebase sign-in can export `DEV_AUTH_BYPASS=true` (with optional UID/email overrides) to have the middleware inject a stub user during `pnpm dev`; keep unset in production.
 

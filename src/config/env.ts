@@ -51,7 +51,30 @@ const serverSchema = z.object({
     }),
   SENDGRID_API_KEY: z.string().min(1).optional(),
   FROM_EMAIL: z.string().email(),
-  APP_BASE_URL: z.string().url()
+  APP_BASE_URL: z.string().url(),
+  DEMO_MODE: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return false;
+      }
+      const normalized = value.trim().toLowerCase();
+      if (normalized.length === 0) {
+        return false;
+      }
+      if (["1", "true", "yes", "on"].includes(normalized)) {
+        return true;
+      }
+      if (["0", "false", "no", "off"].includes(normalized)) {
+        return false;
+      }
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "DEMO_MODE must be true/false"
+      });
+      return z.NEVER;
+    })
 });
 
 const publicSchema = z.object({
@@ -90,7 +113,8 @@ function parseServerEnv(): ServerEnv {
     TOKEN_ENCRYPTION_KEY: process.env.TOKEN_ENCRYPTION_KEY,
     SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
     FROM_EMAIL: process.env.FROM_EMAIL,
-    APP_BASE_URL: process.env.APP_BASE_URL
+    APP_BASE_URL: process.env.APP_BASE_URL,
+    DEMO_MODE: process.env.DEMO_MODE
   });
 
   if (!parsed.success) {

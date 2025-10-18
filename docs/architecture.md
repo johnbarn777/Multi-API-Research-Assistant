@@ -62,6 +62,14 @@
 - **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
 - **CI** – `.github/workflows/ci.yml` runs lint, type-check, Vitest (unit/integration), and Playwright (including axe-core audits) on pushes and pull requests.
 
+## Demo Mode
+
+- `DEMO_MODE=true` replaces live provider calls with deterministic fixtures defined in `src/lib/demo/demoFixtures.ts`. Refinement questions and final prompts are generated from the research topic and prior answers so the state machine behaves exactly as production.
+- Provider runs (`scheduleResearchRun`) short-circuit to fixture results, logging `research.run.*.demo` entries and avoiding OpenAI/Gemini network usage while still updating Firestore with success states and normalized payloads.
+- Email delivery returns a synthetic message id, logs the preview, marks `report.emailStatus=sent`, and exposes the rendered body via `X-Email-Preview-Base64` for demo tooling. Gmail/SendGrid/Tokens remain untouched.
+- PDF persistence skips Firebase Storage while the flag is set, returning a `demo://` path that downstream consumers can surface without depending on GCS.
+- The flag defaults to `false`; unset to re-enable production integrations for end-to-end testing.
+
 ## Observability
 
 - Structured JSON logging (`src/lib/utils/logger.ts`) to pipe context (request id, research id, provider). `resolveRequestId`

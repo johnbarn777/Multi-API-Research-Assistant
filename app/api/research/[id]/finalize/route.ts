@@ -46,6 +46,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       if (result.emailResult.errorMessage) {
         headers.set("X-Email-Error", result.emailResult.errorMessage);
       }
+      if (result.emailResult.preview) {
+        const encodedPreview = Buffer.from(result.emailResult.preview, "utf8").toString("base64");
+        headers.set("X-Email-Preview-Base64", encodedPreview);
+      }
     }
 
     const response = new NextResponse(result.pdfBuffer as unknown as BodyInit, {

@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/config/env";
+import { isDemoMode } from "@/config/features";
 import { getFirebaseAdmin } from "@/lib/firebase/admin";
 import { logger } from "@/lib/utils/logger";
 import { getStorage } from "firebase-admin/storage";
@@ -25,6 +26,20 @@ export async function persistResearchPdf(
 ): Promise<PersistResearchPdfResult> {
   const env = getServerEnv();
   const filename = input.filename?.trim() || DEFAULT_FILENAME;
+
+  if (isDemoMode()) {
+    logger.info("pdf.storage.skipped", {
+      researchId: input.researchId,
+      reason: "Demo mode active"
+    });
+
+    return {
+      status: "skipped",
+      bucket: undefined,
+      path: `demo://${input.researchId}/${filename}`,
+      storageUri: null
+    };
+  }
 
   if (!env.FIREBASE_STORAGE_BUCKET) {
     logger.info("pdf.storage.skipped", {

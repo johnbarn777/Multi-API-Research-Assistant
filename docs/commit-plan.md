@@ -175,3 +175,15 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Integration: CI workflow ensures `pnpm lint`, `pnpm test`, `pnpm test:integration` pass locally.~~ (`.github/workflows/ci.yml`)
 - ~~E2E: Playwright mobile viewport test confirming no horizontal scroll; accessibility scan passes.~~ (`tests/e2e/research.spec.ts`)
 > Status (2025-10-15): `pnpm lint` now passes after normalizing type-only imports, tightening provider/email typings, and wiring the Firebase sign-in flow, unblocking the CI lint gate.
+
+## Commit 13: Demo mode fixtures & delivery bypass
+
+**Implementation Steps**
+- ~~Add `DEMO_MODE` flag validation + tests in `src/config/env.ts` to gate demo behaviour.~~
+- ~~Provide deterministic refinement and provider fixture responses so the research state machine runs without OpenAI/Gemini calls.~~
+- ~~Short-circuit email + PDF storage when demo mode is active, emitting preview headers and preserving Firestore state.~~
+- ~~Document the flag, behaviour, and deployment notes across requirements and architecture docs.~~
+
+**Testing**
+- Unit: `tests/unit/env.test.ts` updated to cover the new flag (not yet re-run in this work session).
+- Integration/E2E: Not run; follow-up to exercise full flow once demo fixtures are merged.

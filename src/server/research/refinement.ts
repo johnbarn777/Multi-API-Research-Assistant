@@ -1,4 +1,6 @@
 import { submitAnswer as submitOpenAiAnswer } from "@/lib/providers/openaiDeepResearch";
+import { isDemoMode } from "@/config/features";
+import { getDemoRefinementResponse } from "@/lib/demo/demoFixtures";
 import { logger } from "@/lib/utils/logger";
 import {
   getResearchRepository,
@@ -106,17 +108,27 @@ export async function submitRefinementAnswer({
     throw Object.assign(new Error("Answer cannot be empty"), { statusCode: 400 });
   }
 
+  const demoMode = isDemoMode();
+
   logger.info("research.refinement.submit", {
     researchId,
     ownerUid,
     questionIndex,
-    requestId
+    requestId,
+    demoMode
   });
 
-  const providerResponse = await submitOpenAiAnswer({
-    sessionId,
-    answer: sanitizedAnswer
-  });
+  const providerResponse = demoMode
+    ? getDemoRefinementResponse({
+        topic: research.title,
+        questionIndex,
+        answer: sanitizedAnswer,
+        existingAnswers: research.dr.answers ?? []
+      })
+    : await submitOpenAiAnswer({
+        sessionId,
+        answer: sanitizedAnswer
+      });
 
   const nextQuestion = providerResponse.nextQuestion ?? null;
   const finalPrompt = providerResponse.finalPrompt?.trim() || null;
@@ -127,7 +139,8 @@ export async function submitRefinementAnswer({
     requestId,
     questionIndex,
     nextQuestionIndex: nextQuestion?.index ?? null,
-    finalPromptCaptured: Boolean(finalPrompt)
+    finalPromptCaptured: Boolean(finalPrompt),
+    demoMode
   });
 
   const nextAnswers = upsertAnswer(research.dr.answers, {

@@ -29,7 +29,7 @@ const REQUIRED_ENV: Record<string, string> = {
   NEXT_PUBLIC_FIREBASE_APP_ID: "1:123:web:abc"
 };
 
-const OPTIONAL_KEYS = ["SENDGRID_API_KEY", "FIREBASE_STORAGE_BUCKET"] as const;
+const OPTIONAL_KEYS = ["SENDGRID_API_KEY", "FIREBASE_STORAGE_BUCKET", "DEMO_MODE"] as const;
 
 const ORIGINAL_ENV: Partial<Record<string, string | undefined>> = {};
 
@@ -94,6 +94,7 @@ describe("environment parser", () => {
     expect(publicEnv.NEXT_PUBLIC_FIREBASE_PROJECT_ID).toBe(
       REQUIRED_ENV.NEXT_PUBLIC_FIREBASE_PROJECT_ID
     );
+    expect(serverEnv.DEMO_MODE).toBe(false);
   });
 
   it("throws when a required variable is missing", () => {
@@ -101,5 +102,13 @@ describe("environment parser", () => {
     resetEnvCache();
 
     expect(() => getServerEnv()).toThrowError(/Invalid server environment/);
+  });
+ 
+  it("interprets demo mode flag values", () => {
+    setEnv({ DEMO_MODE: "true" });
+    expect(getServerEnv().DEMO_MODE).toBe(true);
+
+    setEnv({ DEMO_MODE: "0" });
+    expect(getServerEnv().DEMO_MODE).toBe(false);
   });
 });

@@ -2,8 +2,11 @@ import {
   executeRun as executeOpenAiRun,
   pollResult as pollOpenAiResult
 } from "@/lib/providers/openaiDeepResearch";
+import { isDemoMode } from "@/config/features";
 import { generateContent as generateGeminiContent } from "@/lib/providers/gemini";
+import { getDemoProviderResult } from "@/lib/demo/demoFixtures";
 import { logger } from "@/lib/utils/logger";
+import { wait } from "@/lib/utils/retry";
 import {
   getResearchRepository,
   InvalidResearchStateError,
@@ -93,16 +96,48 @@ async function runOpenAiProvider({
   researchId,
   sessionId,
   prompt,
-  requestId
+  requestId,
+  topic,
+  answers
 }: {
   researchId: string;
   sessionId: string;
   prompt: string;
   requestId?: string;
+  topic: string;
+  answers: Array<{ index: number; answer: string }>;
 }): Promise<ProviderOutcome> {
   const started = Date.now();
   const startedAt = new Date().toISOString();
   let jobId: string | undefined;
+  const demoMode = isDemoMode();
+
+  if (demoMode) {
+    jobId = `demo-openai-${Math.random().toString(36).slice(2, 10)}`;
+    logger.info("research.run.openai.demo", {
+      researchId,
+      requestId,
+      jobId
+    });
+
+    await wait(200);
+    const result = getDemoProviderResult("openai", {
+      topic,
+      prompt,
+      answers
+    });
+    const completedAt = new Date().toISOString();
+
+    return {
+      provider: "openai",
+      status: "success",
+      result,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt,
+      jobId
+    };
+  }
 
   try {
     logger.info("research.run.openai.start", {
@@ -169,14 +204,43 @@ async function runOpenAiProvider({
 async function runGeminiProvider({
   researchId,
   prompt,
-  requestId
+  requestId,
+  topic,
+  answers
 }: {
   researchId: string;
   prompt: string;
   requestId?: string;
+  topic: string;
+  answers: Array<{ index: number; answer: string }>;
 }): Promise<ProviderOutcome> {
   const started = Date.now();
   const startedAt = new Date().toISOString();
+  const demoMode = isDemoMode();
+
+  if (demoMode) {
+    logger.info("research.run.gemini.demo", {
+      researchId,
+      requestId
+    });
+
+    await wait(180);
+    const result = getDemoProviderResult("gemini", {
+      topic,
+      prompt,
+      answers
+    });
+    const completedAt = new Date().toISOString();
+
+    return {
+      provider: "gemini",
+      status: "success",
+      result,
+      durationMs: Math.max(0, Date.now() - started),
+      startedAt,
+      completedAt
+    };
+  }
 
   try {
     logger.info("research.run.gemini.start", {
@@ -231,7 +295,9 @@ async function executeProviders({
   ownerUid,
   sessionId,
   finalPrompt,
-  requestId
+  requestId,
+  topic,
+  answers
 }: {
   repository: ResearchRepository;
   researchId: string;
@@ -239,6 +305,8 @@ async function executeProviders({
   sessionId: string;
   finalPrompt: string;
   requestId?: string;
+  topic: string;
+  answers: Array<{ index: number; answer: string }>;
 }): Promise<void> {
   let openAiOutcome: ProviderOutcome | null = null;
   let geminiOutcome: ProviderOutcome | null = null;
@@ -249,7 +317,9 @@ async function executeProviders({
         researchId,
         sessionId,
         prompt: finalPrompt,
-        requestId
+        requestId,
+        topic,
+        answers
       }).then(async (outcome) => {
         openAiOutcome = outcome;
         await repository.update(
@@ -261,7 +331,13 @@ async function executeProviders({
         );
         return outcome;
       }),
-      runGeminiProvider({ researchId, prompt: finalPrompt, requestId }).then(async (outcome) => {
+      runGeminiProvider({
+        researchId,
+        prompt: finalPrompt,
+        requestId,
+        topic,
+        answers
+      }).then(async (outcome) => {
         geminiOutcome = outcome;
         await repository.update(
           researchId,
@@ -422,7 +498,9 @@ export async function scheduleResearchRun({
     ownerUid,
     sessionId,
     finalPrompt,
-    requestId
+    requestId,
+    topic: research.title,
+    answers: research.dr.answers ?? []
   }).catch((error) => {
     logger.error("research.run.unhandled_error", {
       researchId,

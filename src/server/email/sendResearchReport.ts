@@ -1,4 +1,5 @@
 import { getServerEnv } from "@/config/env";
+import { isDemoMode } from "@/config/features";
 import {
   sendWithGmail,
   sendWithSendgrid,
@@ -6,6 +7,7 @@ import {
   type GmailSendFailure,
   type GmailTokens
 } from "@/lib/email";
+import { buildDemoEmailPreview } from "@/lib/demo/demoFixtures";
 import { encryptGmailToken } from "@/lib/security/crypto";
 import { logger } from "@/lib/utils/logger";
 import { NonRetryableError, retryWithBackoff } from "@/lib/utils/retry";
@@ -25,7 +27,7 @@ export interface SendResearchReportInput {
 
 export interface SendResearchReportResult {
   status: "sent" | "failed";
-  provider: "gmail" | "sendgrid" | "none";
+  provider: "gmail" | "sendgrid" | "demo" | "none";
   messageId: string | null;
   errorMessage?: string | null;
   gmailAttempt?: {
@@ -33,6 +35,7 @@ export interface SendResearchReportResult {
     reason?: string;
     shouldInvalidateCredentials?: boolean;
   };
+  preview?: string;
 }
 
 const APP_SIGNATURE = "— Multi-API Research Assistant";
@@ -186,6 +189,7 @@ export async function sendResearchReportEmail(
   const env = getServerEnv();
   const subject = buildSubject(input.title);
   const body = buildBody(env.APP_BASE_URL, input.researchId, input.title);
+  const demoMode = isDemoMode();
 
   const researchRepository = getResearchRepository();
   const userRepository = getUserRepository();
@@ -204,6 +208,44 @@ export async function sendResearchReportEmail(
 
   const user = await userRepository.getById(input.ownerUid);
   const gmailTokens = user?.gmail_oauth;
+
+  if (demoMode) {
+    const preview = buildDemoEmailPreview({
+      to: input.to,
+      subject,
+      body,
+      filename: input.filename,
+      pdfSize: input.pdfBuffer.byteLength
+    });
+
+    const messageId = `demo-email-${Math.random().toString(36).slice(2, 10)}`;
+
+    await researchRepository.update(
+      input.researchId,
+      {
+        report: {
+          emailedTo: input.to,
+          emailStatus: "sent",
+          emailError: null
+        }
+      },
+      { ownerUid: input.ownerUid }
+    );
+
+    logger.info("email.delivery.demo", {
+      researchId: input.researchId,
+      ownerUid: input.ownerUid,
+      requestId: input.requestId,
+      messageId
+    });
+
+    return {
+      status: "sent",
+      provider: "demo",
+      messageId,
+      preview
+    };
+  }
 
   let gmailAttempt: GmailSendResult | null = null;
 

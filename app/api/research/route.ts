@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
+import { isDemoMode } from "@/config/features";
 import { startSession as startOpenAiSession } from "@/lib/providers/openaiDeepResearch";
+import { createDemoResearchSession } from "@/lib/demo/demoFixtures";
 import { getResearchRepository } from "@/server/repositories/researchRepository";
 import { z } from "zod";
 import { logger } from "@/lib/utils/logger";
@@ -104,14 +106,18 @@ export async function POST(request: NextRequest) {
     titleLength: title.length
   });
 
-  const openAiSession = await startOpenAiSession({ topic: title }).catch((error) => {
-    logger.error("api.research.start_session_failed", {
-      requestId,
-      ownerUid: sessionOrResponse.uid,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return null;
-  });
+  const demoMode = isDemoMode();
+
+  const openAiSession = demoMode
+    ? createDemoResearchSession(title)
+    : await startOpenAiSession({ topic: title }).catch((error) => {
+        logger.error("api.research.start_session_failed", {
+          requestId,
+          ownerUid: sessionOrResponse.uid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+        return null;
+      });
 
   if (!openAiSession) {
     return jsonError({
@@ -137,7 +143,8 @@ export async function POST(request: NextRequest) {
       requestId,
       ownerUid: sessionOrResponse.uid,
       researchId: created.id,
-      initialQuestionCount: openAiSession.questions.length
+      initialQuestionCount: openAiSession.questions.length,
+      demoMode
     });
 
     const response = NextResponse.json(
