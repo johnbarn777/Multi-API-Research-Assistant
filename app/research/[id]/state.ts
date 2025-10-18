@@ -30,7 +30,7 @@ export function mergeDraftAnswers(
 
 export function findQuestionIndex(questions: Question[], target: Question | null | undefined): number {
   if (!target) {
-    return questions.length > 0 ? 0 : 0;
+    return 0;
   }
 
   const match = questions.findIndex((question) => question.index === target.index);
