@@ -20,12 +20,18 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   try {
+    const skipEmailParam = request.nextUrl.searchParams.get("skipEmail");
+    const skipEmail =
+      typeof skipEmailParam === "string" &&
+      ["1", "true", "yes", "on"].includes(skipEmailParam.toLowerCase());
+
     const result = await finalizeResearch({
       researchId: params.id,
       ownerUid: sessionOrResponse.uid,
       userEmail: sessionOrResponse.email,
       fallbackEmail: sessionOrResponse.email,
-      requestId
+      requestId,
+      sendEmail: !skipEmail
     });
 
     const headers = new Headers({
@@ -33,6 +39,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       "Content-Length": result.pdfBuffer.byteLength.toString(),
       "Content-Disposition": `attachment; filename="${encodeURIComponent(result.filename)}"`
     });
+
+    if (skipEmail) {
+      headers.set("X-Email-Skipped", "true");
+    }
 
     headers.set("X-Storage-Status", result.storageStatus);
     if (result.pdfPath) {

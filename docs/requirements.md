@@ -518,6 +518,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * AC2: If OAuth absent/invalid → send via SendGrid using `FROM_EMAIL`.
 * AC3: Store `report.emailStatus` (sent/failed) and target email.
 * AC4: Persist `report.emailError` with the provider failure message when delivery fails.
+* AC5: When delivery cannot complete, the research detail page exposes a manual “Download report PDF” button so users can retrieve the report immediately.
 
 **Unit**
 
@@ -534,11 +535,14 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 
 * EE1: Completing a run results in a “Email sent” banner; webhook/mailbox test optional (mock inbox). (`tests/e2e/research.spec.ts`)
 * EE2: Delivery failure surfaces an “Email failed” banner with the captured reason. (`tests/e2e/research.spec.ts`)
+* EE3: Manual download fallback triggers a PDF fetch without re-attempting email. *(To be automated.)*
 
 **Pass/Fail**
 
 * **Pass:** At least one provider path functions; status tracked.
 * **Fail:** No email attempt or wrong provider chosen.
+
+> Status: Gmail OAuth consent UI is still pending, so stored tokens must be seeded manually. The manual download fallback added in this change keeps report access unblocked when email credentials are missing.
 
 ---
 

@@ -58,6 +58,8 @@ export default function ResearchDetailPage() {
   const [isRetryingEmail, setIsRetryingEmail] = useState(false);
   const [emailRetryError, setEmailRetryError] = useState<string | null>(null);
   const [emailRetrySuccess, setEmailRetrySuccess] = useState<string | null>(null);
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!researchId) {
@@ -193,6 +195,7 @@ export default function ResearchDetailPage() {
         return { label: "Awaiting delivery", className: "border-slate-700 text-slate-300" };
     }
   })();
+  const canDownloadReport = research?.status === "completed" || research?.status === "failed";
 
   const handleAnswerChange = (value: string) => {
     if (!currentQuestion) {
@@ -396,6 +399,72 @@ export default function ResearchDetailPage() {
     }
   };
 
+  const handleDownloadReport = async () => {
+    if (!researchId) {
+      return;
+    }
+
+    setIsDownloadingReport(true);
+    setDownloadError(null);
+
+    try {
+      const headers: HeadersInit = {};
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `/api/research/${encodeURIComponent(researchId)}/finalize?skipEmail=true`,
+        {
+          method: "POST",
+          headers
+        }
+      );
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { message?: string } | null;
+        const message = body?.message ?? "Failed to download report";
+        throw new Error(message);
+      }
+
+      const blob = await response.blob();
+      let filename = "research-report.pdf";
+      const disposition = response.headers.get("Content-Disposition");
+
+      if (disposition) {
+        const match =
+          disposition.match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/i);
+        const rawFilename = match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+        if (rawFilename) {
+          const sanitized = rawFilename.replace(/"/g, "");
+          try {
+            filename = decodeURIComponent(sanitized);
+          } catch {
+            filename = sanitized;
+          }
+          if (!filename.toLowerCase().endsWith(".pdf")) {
+            filename = `${filename}.pdf`;
+          }
+        }
+      }
+
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to download report";
+      setDownloadError(message);
+    } finally {
+      setIsDownloadingReport(false);
+    }
+  };
+
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col gap-10 px-6 py-12">
       <div className="flex items-center gap-2 text-sm text-slate-400">
@@ -565,9 +634,27 @@ export default function ResearchDetailPage() {
             {isRetryingEmail ? "Retrying delivery…" : "Retry email delivery"}
           </button>
         ) : null}
+        {downloadError ? (
+          <div className="mb-4 rounded-md border border-rose-500/60 bg-rose-500/10 p-4 text-sm text-rose-100">
+            {downloadError}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={handleDownloadReport}
+          disabled={!canDownloadReport || isDownloadingReport}
+          className="mb-4 inline-flex items-center rounded-md border border-slate-500 px-4 py-2 text-sm font-medium text-slate-100 transition hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isDownloadingReport ? "Preparing download…" : "Download report PDF"}
+        </button>
+        {!canDownloadReport ? (
+          <p className="mb-2 text-xs text-slate-500">
+            The PDF becomes available for download after provider runs complete.
+          </p>
+        ) : null}
         <p className="text-sm text-slate-400">
-          Once both providers complete, the system generates a PDF report and emails it to the user. This area
-          will display download links and delivery status.
+          Once both providers complete, the system generates a PDF report, attempts email delivery, and makes a
+          direct download available here.
         </p>
       </section>
     </main>

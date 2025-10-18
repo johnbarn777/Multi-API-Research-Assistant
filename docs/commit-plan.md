@@ -130,6 +130,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Update finalize route to call email sender after PDF build and store `report.emailStatus`, `emailedTo` fields.~~ (`app/api/research/[id]/finalize/route.ts` now emits email headers.)
 - ~~Surface success/error toast/banners on research detail page once email attempt finishes.~~ (`app/research/[id]/page.tsx` shows success/failure banners leveraging `report.emailStatus`/`emailError`.)
 - Enhancement: Provider runs now trigger the finalize/email pipeline automatically once at least one provider reports success, pulling the owner’s email from the user profile so delivery happens without an extra manual API call. When no profile email is available the pipeline reuses the session email (or a deterministic demo fallback) so demo flows never stall on delivery.
+- Deviation: Gmail OAuth consent capture is still outstanding, so delivery fails without pre-seeded tokens. Added a skip-email finalize path (`/api/research/:id/finalize?skipEmail=true`) and a “Download report PDF” button on the detail page to guarantee access to the report even when email credentials are missing.
 
 **Testing**
 - ~~Unit: Tests for Gmail RFC822 builder, fallback selection, token refresh failure leading to SendGrid usage.~~ (`tests/unit/email/gmail.test.ts`, `tests/unit/email/sendResearchReport.test.ts`)

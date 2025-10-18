@@ -20,6 +20,7 @@ interface FinalizeResearchInput {
   userEmail?: string | null;
   fallbackEmail?: string | null;
   requestId?: string;
+  sendEmail?: boolean;
 }
 
 export interface FinalizeResearchResult {
@@ -71,7 +72,8 @@ export async function finalizeResearch({
   ownerUid,
   userEmail,
   fallbackEmail,
-  requestId
+  requestId,
+  sendEmail
 }: FinalizeResearchInput): Promise<FinalizeResearchResult> {
   const repository: ResearchRepository = getResearchRepository();
 
@@ -101,6 +103,7 @@ export async function finalizeResearch({
     normalizedUserEmail || normalizedFallbackEmail || normalizedStoredEmail || fallbackDemoEmail || null;
   const emailForReport =
     (resolvedEmail ?? normalizedFallbackEmail ?? normalizedStoredEmail) || "unknown@user";
+  const shouldSendEmail = sendEmail !== false;
 
   logger.info("research.finalize.start", {
     researchId,
@@ -146,7 +149,13 @@ export async function finalizeResearch({
 
   let emailResult: SendResearchReportResult | null = null;
 
-  if (resolvedEmail) {
+  if (!shouldSendEmail) {
+    logger.info("research.finalize.skip_email", {
+      researchId,
+      ownerUid,
+      requestId
+    });
+  } else if (resolvedEmail) {
     try {
       emailResult = await sendResearchReportEmail({
         researchId,
@@ -187,7 +196,7 @@ export async function finalizeResearch({
         errorMessage: reason
       };
     }
-  } else {
+  } else if (shouldSendEmail) {
     const reason = "User email not available for delivery";
     await repository.update(
       researchId,
