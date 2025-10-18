@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
+import { jsonError } from "@/server/http/jsonError";
 
 const AUTH_HEADER_UID = "x-user-uid";
 const AUTH_HEADER_EMAIL = "x-user-email";
@@ -67,23 +68,39 @@ export function requireAuth(request: Request | HeaderLike): AuthSession {
 
 export function ensureAuthenticated(
   request: Request,
-  message = "Authentication required"
+  message = "Authentication required",
+  requestId?: string
 ): AuthSession | NextResponse {
   const session = getAuthSession(request);
 
   if (!session) {
-    return NextResponse.json({ error: message }, { status: 401 });
+    return jsonError({
+      code: "auth.unauthorized",
+      message,
+      status: 401,
+      requestId
+    });
   }
 
   return session;
 }
 
-export function unauthorizedResponse(message = "Authentication required") {
-  return NextResponse.json({ error: message }, { status: 401 });
+export function unauthorizedResponse(message = "Authentication required", requestId?: string) {
+  return jsonError({
+    code: "auth.unauthorized",
+    message,
+    status: 401,
+    requestId
+  });
 }
 
-export function forbiddenResponse(message = "Forbidden") {
-  return NextResponse.json({ error: message }, { status: 403 });
+export function forbiddenResponse(message = "Forbidden", requestId?: string) {
+  return jsonError({
+    code: "auth.forbidden",
+    message,
+    status: 403,
+    requestId
+  });
 }
 
 export function assertOwner<T extends { ownerUid: string }>(resource: T, uid: string): T {

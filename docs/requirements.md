@@ -265,9 +265,9 @@ Side effects:
   * `RefinementQA` (question, textarea, back/next)
   * `ProviderProgress` (OpenAI/Gemini status: idle/queued/running/success/failure; summaries, tokens, timestamps)
   * `Toasts` for errors
-* **Responsive:** Mobile-first; single-column; min tap targets 44px.
+* **Responsive:** Mobile-first; single-column; min tap targets 44px; dashboard verified at 375px width with no horizontal scroll.
 * **Empty States:** Helpful copy; guide to create first research.
-* **Accessibility:** Labels for inputs, semantic headings, focus ring.
+* **Accessibility:** Labels for inputs, semantic headings, focus ring, skip link to main content, and axe-core audits on dashboard/detail flows.
 
 **Status Chips**
 
@@ -277,11 +277,11 @@ Side effects:
 
 ## 9) Error Handling & Retries
 
-* Standardized error envelope `{ code, message, retryAfterMs? }` from API routes.
+* Standardized error envelope `{ code, message, retryAfterMs?, requestId }` from API routes via `jsonError`.
 * **Retries:**
 
-  * Provider calls: exponential backoff (up to 3 attempts)
-  * Email send: retry once, then fallback provider; surface `emailStatus` in UI
+  * Provider calls: exponential backoff (up to 3 attempts) shared through `retryWithBackoff`.
+  * Email send: retry once, then fallback provider; surface `emailStatus` in UI.
 * **Timeouts:** Provider calls capped (e.g., 60s); long tasks use polling.
 * **Partial Failure:** If one provider fails, PDF still generated with successful provider and failure note; email still sent.
 
@@ -299,6 +299,7 @@ Side effects:
 ## 11) Observability
 
 * Structured logs with request id, research id, provider, duration.
+  * API responses echo `X-Request-Id` so clients can correlate with server logs.
 * Basic metrics: counts by status, average duration per provider.
 * Error traces with provider context (no secrets).
 
@@ -544,20 +545,22 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 
 **Acceptance Criteria**
 
-* AC1: List of prior research sessions (most recent first) with status chips.
+* AC1: Server-rendered dashboard lists prior research sessions (most recent first) with status chips, empty state, and responsive layout.
 * AC2: Clicking an item opens detail view.
+* AC3: Loading skeletons display during initial navigation while data is fetched.
 
 **Unit**
 
-* UT1: List component renders `ResearchCard` items correctly.
+* UT1: `tests/unit/components/ResearchCard.test.tsx` verifies status chip labelling and created-date fallbacks.
+* UT2: `tests/unit/components/ResearchCardList.test.tsx` covers empty state CTA rendering.
 
 **Integration**
 
-* IT1: `GET /api/research` paginates for the user.
+* IT1: `tests/integration/api-research.test.ts` validates `GET /api/research` limit/cursor pagination behaviour.
 
 **E2E**
 
-* EE1: Create 3 sessions; verify order and navigation.
+* EE1: `tests/e2e/research.spec.ts` confirms dashboard ordering/status display with fixture-backed sessions.
 
 **Pass/Fail**
 
@@ -592,6 +595,9 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * Commit 3 introduces a typed Firestore data layer; repository unit tests (Vitest) validate state transitions & pagination, and integration coverage exercises `/api/research` create/list flows with middleware in place.
 * 2025-10-15: `pnpm lint` now passes after normalizing type-only imports, removing `any` usage in provider clients, and tightening placeholder email stubs.
 * 2025-10-15: Google sign-in is wired via Firebase Auth (`signInWithPopup` + `browserLocalPersistence`) and the client syncs the `firebaseToken` cookie for middleware consumption.
+* 2025-10-16: Commit 10 dashboard polish verified with `pnpm test:unit` and `pnpm test:integration`. Playwright dashboard scenario uses a non-production `__dashboard_fixture` cookie to feed fixture data into the server-rendered list.
+* 2025-10-17: Commit 11 reliability work verified via `pnpm test:unit` (new `tests/unit/utils/retry.test.ts`) and `pnpm test:integration` (`tests/integration/provider-retry.test.ts`, updated finalize email scenarios).
+* 2025-10-17: Commit 12 accessibility & CI updates validated with `pnpm test:e2e` (axe-core scan + mobile viewport) and the new GitHub Actions workflow.
 
 ---
 
@@ -621,7 +627,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 **NFR-5 Reliability**
 
 * **AC:** Provider calls retried up to 3 times with backoff.
-* **Test:** Simulate transient 5xx → eventual success.
+* **Test:** Simulate transient 5xx → eventual success (`tests/integration/provider-retry.test.ts`).
 
 ---
 

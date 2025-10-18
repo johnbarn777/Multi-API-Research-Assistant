@@ -138,39 +138,40 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 ## Commit 10: Dashboard & history UX polish
 
 **Implementation Steps**
-- Implement dashboard page (`app/dashboard/page.tsx`) listing research sessions via server component fetching `/api/research` with pagination.
-- Build `ResearchCard` component with status chip, created date, and navigation link.
-- Add empty state, loading skeletons, and responsive layout per UX requirements.
-- Ensure routing from `/` to `/dashboard` post-login and sign-out flows.
+- ~~Implement dashboard page (`app/dashboard/page.tsx`) listing research sessions via server component fetching `/api/research` with pagination.~~
+- ~~Build `ResearchCard` component with status chip, created date, and navigation link.~~
+- ~~Add empty state, loading skeletons, and responsive layout per UX requirements.~~
+- ~~Ensure routing from `/` to `/dashboard` post-login and sign-out flows.~~
+- Added a non-production `__dashboard_fixture` cookie override so E2E can supply fixture data to the server-rendered dashboard while keeping production behaviour untouched.
 
 **Testing**
-- Unit: Component snapshot/interaction tests verifying chips, empty states.
-- Integration: Supertest verifying pagination query parameters.
-- E2E: Playwright test logging in, creating multiple research sessions, and confirming order/status display.
+- ~~Unit: Component snapshot/interaction tests verifying chips, empty states.~~
+- ~~Integration: Supertest verifying pagination query parameters.~~
+- ~~E2E: Playwright test logging in, creating multiple research sessions, and confirming order/status display.~~
 
 ## Commit 11: Observability, error handling, and retries
 
 **Implementation Steps**
-- Centralize error envelope helper returning `{ code, message, retryAfterMs? }` for API routes.
-- Add exponential backoff utilities reused by provider and email calls; ensure max retry counts per requirement.
-- Instrument structured logging in key server paths (research create, answer, run, finalize) including request ID/research ID metadata.
-- Document retry/backoff behavior in `docs/architecture.md` updates.
+- ~~Centralize error envelope helper returning `{ code, message, retryAfterMs? }` for API routes.~~
+- ~~Add exponential backoff utilities reused by provider and email calls; ensure max retry counts per requirement.~~
+- ~~Instrument structured logging in key server paths (research create, answer, run, finalize) including request ID/research ID metadata.~~
+- ~~Document retry/backoff behavior in `docs/architecture.md` updates.~~
 
 **Testing**
-- Unit: Tests for retry helper ensuring delay schedule and abort on non-retryable errors.
-- Integration: Supertest simulating provider 5xx responses to confirm retries logged and eventual success/failure matches spec.
+- ~~Unit: Tests for retry helper ensuring delay schedule and abort on non-retryable errors.~~ (`tests/unit/utils/retry.test.ts`)
+- ~~Integration: Supertest simulating provider 5xx responses to confirm retries logged and eventual success/failure matches spec.~~ (`tests/integration/provider-retry.test.ts`)
 - E2E: Not required (covered by previous flows).
 
 ## Commit 12: Accessibility, responsiveness, and CI coverage
 
 **Implementation Steps**
-- Add Tailwind responsive utilities to key components ensuring mobile layout without overflow, 44px tap targets, and focus outlines.
-- Integrate `@axe-core/playwright` into E2E suite for accessibility checks on dashboard and research detail pages.
-- Configure GitHub Actions workflow (`.github/workflows/ci.yml`) running lint, typecheck, unit, integration, and Playwright tests.
-- Update README with testing commands and CI badge placeholder.
+- ~~Add Tailwind responsive utilities to key components ensuring mobile layout without overflow, 44px tap targets, and focus outlines.~~ (`app/dashboard/page.tsx`, `src/components/layout/AppHeader.tsx`, `src/components/research/ResearchCard*.tsx`)
+- ~~Integrate `@axe-core/playwright` into E2E suite for accessibility checks on dashboard and research detail pages.~~ (`tests/e2e/research.spec.ts`)
+- ~~Configure GitHub Actions workflow (`.github/workflows/ci.yml`) running lint, typecheck, unit, integration, and Playwright tests.~~
+- ~~Update README with testing commands and CI badge placeholder.~~
 
 **Testing**
 - Unit: None new beyond lint/typecheck.
-- Integration: CI workflow ensures `pnpm lint`, `pnpm test`, `pnpm test:integration` pass locally.
-- E2E: Playwright mobile viewport test confirming no horizontal scroll; accessibility scan passes.
+- ~~Integration: CI workflow ensures `pnpm lint`, `pnpm test`, `pnpm test:integration` pass locally.~~ (`.github/workflows/ci.yml`)
+- ~~E2E: Playwright mobile viewport test confirming no horizontal scroll; accessibility scan passes.~~ (`tests/e2e/research.spec.ts`)
 > Status (2025-10-15): `pnpm lint` now passes after normalizing type-only imports, tightening provider/email typings, and wiring the Firebase sign-in flow, unblocking the CI lint gate.

@@ -1,5 +1,6 @@
 # Multi-API Deep Research Assistant
 
+
 This repository scaffolds a Next.js 15 full-stack application that orchestrates OpenAI Deep Research, Google Gemini, PDF report generation, and email delivery. Functionality is intentionally stubbed – the goal is to provide a clear, scalable structure that you can iterate on quickly.
 
 ## Stack Overview
@@ -61,12 +62,17 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
    pnpm dev
    ```
 
-4. **Run tests**
+4. **Lint, type-check, and run tests**
 
    ```bash
+   pnpm lint
+   pnpm type-check
    pnpm test:unit
    pnpm test:integration
    pnpm test:e2e
+   pnpm test
+   # or run every check sequentially
+   pnpm test:ci
    ```
 
 ## Authentication Setup
@@ -101,14 +107,14 @@ Only `NEXT_PUBLIC_*` variables are shipped to the browser; everything else is re
 
 ## Implementation Roadmap
 
-- **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope.
+- **Auth:** Connect `/api/auth/session` and middleware to Firebase Auth & Google OAuth consent for Gmail scope. `DEV_AUTH_BYPASS` defaults to `false`; only toggle it on intentionally when you cannot obtain real tokens locally.
 - **Firestore:** Replace stubbed responses with Firestore reads/writes, enforce ownership checks per requirement.
 - **OpenAI Deep Research:** Implement session creation, refinement loop, execution, and polling utilities in `src/lib/providers/openaiDeepResearch.ts`.
 - **Gemini:** Wire `generateContent` to invoke the appropriate Gemini model (with polling when required) and normalize the output.
 - **PDF & Email:** Expand `buildResearchPdf` for full layout, then deliver via `sendResearchReportEmail` (Gmail first, SendGrid fallback).
 - **State Machine:** Use `src/server/research/state-machine.ts` to validate transitions, surface errors consistently via `AppError`.
 - **Testing:** Add emulator-backed integration tests and Playwright scenarios once the API contracts are fulfilled.
-- **CI/CD:** Create GitHub Actions workflow (lint + tests) and configure Vercel project settings when deploying.
+- **CI/CD:** GitHub Actions workflow (`.github/workflows/ci.yml`) runs linting, type checks, Vitest suites, and Playwright against every push/PR; update Vercel project settings when deploying.
 
 ## Deploying to Vercel
 
@@ -118,7 +124,13 @@ The application is optimized for Vercel’s hybrid Edge/Node platform. Follow th
 
 - **Unit:** Vitest + Testing Library for UI/state logic; sample test provided for research state machine.
 - **Integration:** Vitest (node environment) + Supertest for API routes; tests are currently `skip`ped pending implementation.
-- **E2E:** Playwright targets major browsers + mobile viewport; stub in place for future flows.
+- **E2E:** Playwright targets major browsers + mobile viewport; accessibility audits run via `@axe-core/playwright`.
+
+## Continuous Integration
+
+- Workflow: `.github/workflows/ci.yml`
+- Checks: `pnpm lint`, `pnpm type-check`, `pnpm test:unit`, `pnpm test:integration`, `pnpm test:e2e`
+- Badge: replace `OWNER/REPO` in the badge markup at the top of this README once the repository lives under its permanent GitHub namespace.
 
 ## Additional Notes
 

@@ -339,8 +339,54 @@ describe("API /api/research", () => {
 
     const response = await request(app).get("/api/research").expect(401);
 
-    expect(response.body).toEqual({ error: "Unauthorized" });
+    expect(response.body).toMatchObject({
+      code: "auth.unauthorized",
+      message: "Unauthorized"
+    });
+    expect(typeof response.body.requestId).toBe("string");
+    expect(response.headers["x-request-id"]).toBe(response.body.requestId);
     expect(verifyFirebaseIdToken).not.toHaveBeenCalled();
+  });
+
+  it("applies limit and cursor query parameters for pagination", async () => {
+    verifyFirebaseIdToken.mockResolvedValue({
+      uid: "test-user",
+      email: "user@example.com"
+    });
+
+    for (let index = 0; index < 5; index += 1) {
+      await repository.create({
+        ownerUid: "test-user",
+        title: `Research ${index + 1}`,
+        status: "completed",
+        dr: { status: "success" },
+        gemini: { status: "success" }
+      });
+    }
+
+    const app = createApp();
+
+    const firstPage = await request(app)
+      .get("/api/research")
+      .query({ limit: 2 })
+      .set("Authorization", "Bearer valid-token")
+      .expect(200);
+
+    expect(firstPage.body.items).toHaveLength(2);
+    expect(firstPage.body.items[0].id).toBe("research-5");
+    expect(firstPage.body.items[1].id).toBe("research-4");
+    expect(firstPage.body.nextCursor).toBeTruthy();
+
+    const secondPage = await request(app)
+      .get("/api/research")
+      .query({ limit: 2, cursor: firstPage.body.nextCursor })
+      .set("Authorization", "Bearer valid-token")
+      .expect(200);
+
+    expect(secondPage.body.items).toHaveLength(2);
+    expect(secondPage.body.items[0].id).toBe("research-2");
+    expect(secondPage.body.items[1].id).toBe("research-1");
+    expect(secondPage.body.nextCursor).toBeNull();
   });
 
   it("returns a paginated list for the authenticated user", async () => {
@@ -402,7 +448,11 @@ describe("API /api/research", () => {
       .send({ title: "" })
       .expect(400);
 
-    expect(response.body.error).toBe("Invalid request");
+    expect(response.body).toMatchObject({
+      code: "validation.invalid_request",
+      message: "Invalid request"
+    });
+    expect(response.body).toHaveProperty("requestId");
   });
 
   it("returns 502 when OpenAI Deep Research session fails", async () => {
@@ -419,9 +469,11 @@ describe("API /api/research", () => {
       .send({ title: "Fails" })
       .expect(502);
 
-    expect(response.body).toEqual({
-      error: "Failed to start OpenAI Deep Research session"
+    expect(response.body).toMatchObject({
+      code: "research.create.openai_start_failed",
+      message: "Failed to start OpenAI Deep Research session"
     });
+    expect(response.body).toHaveProperty("requestId");
   });
 
   it("returns a research document for the owner", async () => {

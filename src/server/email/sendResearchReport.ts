@@ -3,12 +3,15 @@ import {
   sendWithGmail,
   sendWithSendgrid,
   type GmailSendResult,
+  type GmailSendFailure,
   type GmailTokens
 } from "@/lib/email";
 import { encryptGmailToken } from "@/lib/security/crypto";
 import { logger } from "@/lib/utils/logger";
+import { NonRetryableError, retryWithBackoff } from "@/lib/utils/retry";
 import { getResearchRepository } from "@/server/repositories/researchRepository";
 import { getUserRepository } from "@/server/repositories/userRepository";
+import type { GmailOAuthTokens } from "@/types/research";
 
 export interface SendResearchReportInput {
   researchId: string;
@@ -17,6 +20,7 @@ export interface SendResearchReportInput {
   title: string;
   filename: string;
   pdfBuffer: Buffer;
+  requestId?: string;
 }
 
 export interface SendResearchReportResult {
@@ -64,12 +68,12 @@ function truncateError(message: string | undefined, maxLength = 500) {
   return `${message.slice(0, maxLength - 1)}…`;
 }
 
-function toEncryptedTokens(tokens?: GmailTokens | null): GmailTokens | null {
+function toEncryptedTokens(tokens?: GmailTokens | null): GmailOAuthTokens | null {
   if (!tokens) {
     return null;
   }
 
-  const next: GmailTokens = {};
+  const next: GmailOAuthTokens = {};
 
   if (tokens.access_token) {
     next.access_token = encryptGmailToken(tokens.access_token);
@@ -80,11 +84,100 @@ function toEncryptedTokens(tokens?: GmailTokens | null): GmailTokens | null {
   if (typeof tokens.expiry_date === "number") {
     next.expiry_date = tokens.expiry_date;
   }
-  if (tokens.scope) {
+  if (typeof tokens.scope === "string" && tokens.scope.length > 0) {
     next.scope = tokens.scope;
   }
 
   return next;
+}
+
+type GmailSendParams = Parameters<typeof sendWithGmail>[0];
+
+function isGmailFailureResult(value: unknown): value is GmailSendFailure {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  if (!("ok" in (value as Record<string, unknown>))) {
+    return false;
+  }
+  return (value as { ok?: unknown }).ok === false;
+}
+
+function extractGmailFailure(error: unknown): GmailSendFailure | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if ("cause" in error && isGmailFailureResult((error as { cause?: unknown }).cause)) {
+    return (error as { cause: GmailSendFailure }).cause;
+  }
+
+  return null;
+}
+
+async function sendGmailWithRetry(
+  params: GmailSendParams,
+  context: { researchId: string; ownerUid: string; requestId?: string }
+): Promise<GmailSendResult> {
+  try {
+    return await retryWithBackoff(
+      async () => {
+        const result = await sendWithGmail(params);
+        if (result.ok) {
+          return result;
+        }
+
+        const message = result.reason ?? "Failed to send email with Gmail";
+
+        if (result.shouldInvalidateCredentials) {
+          throw new NonRetryableError(message, { cause: result });
+        }
+
+        const retryError = new Error(message);
+        (retryError as { cause?: unknown }).cause = result;
+        throw retryError;
+      },
+      {
+        maxAttempts: 2,
+        initialDelayMs: 500,
+        onRetry: (error, attemptContext) => {
+          const failure = extractGmailFailure(error);
+          logger.warn("email.gmail.retry", {
+            researchId: context.researchId,
+            ownerUid: context.ownerUid,
+            requestId: context.requestId,
+            attempt: attemptContext.attempt,
+            maxAttempts: attemptContext.maxAttempts,
+            delayMs: attemptContext.delayMs,
+            reason:
+              failure?.reason ??
+              (error instanceof Error ? error.message : String(error))
+          });
+        }
+      }
+    );
+  } catch (error) {
+    const failure = extractGmailFailure(error);
+    if (failure) {
+      return failure;
+    }
+
+    const reason =
+      error instanceof Error ? error.message : "Failed to send email with Gmail";
+
+    logger.error("email.gmail.retry_unexpected", {
+      researchId: context.researchId,
+      ownerUid: context.ownerUid,
+      requestId: context.requestId,
+      reason
+    });
+
+    return {
+      ok: false,
+      reason,
+      error
+    };
+  }
 }
 
 export async function sendResearchReportEmail(
@@ -115,15 +208,22 @@ export async function sendResearchReportEmail(
   let gmailAttempt: GmailSendResult | null = null;
 
   if (gmailTokens) {
-    gmailAttempt = await sendWithGmail({
-      to: input.to,
-      subject,
-      body,
-      pdfBuffer: input.pdfBuffer,
-      filename: input.filename,
-      tokens: gmailTokens,
-      ...(user?.email ? { from: user.email } : {})
-    });
+    gmailAttempt = await sendGmailWithRetry(
+      {
+        to: input.to,
+        subject,
+        body,
+        pdfBuffer: input.pdfBuffer,
+        filename: input.filename,
+        tokens: gmailTokens,
+        from: input.to
+      },
+      {
+        researchId: input.researchId,
+        ownerUid: input.ownerUid,
+        requestId: input.requestId
+      }
+    );
 
     if (gmailAttempt.ok) {
       if (gmailAttempt.tokens) {
@@ -196,6 +296,7 @@ export async function sendResearchReportEmail(
     logger.error("email.delivery.failed", {
       researchId: input.researchId,
       ownerUid: input.ownerUid,
+      requestId: input.requestId,
       gmailReason: gmailReason ?? undefined,
       sendgridReason: fallbackReason ?? undefined
     });

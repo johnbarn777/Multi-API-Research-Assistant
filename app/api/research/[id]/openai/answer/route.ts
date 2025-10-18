@@ -5,6 +5,8 @@ import { ensureAuthenticated } from "@/server/auth/session";
 import { submitRefinementAnswer } from "@/server/research/refinement";
 import { serializeResearch } from "@/server/serializers/research";
 import { logger } from "@/lib/utils/logger";
+import { jsonError } from "@/server/http/jsonError";
+import { resolveRequestId, withRequestId } from "@/server/http/requestContext";
 
 type Params = {
   params: {
@@ -23,9 +25,10 @@ const answerSchema = z.object({
 });
 
 export async function POST(request: NextRequest, { params }: Params) {
-  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized");
+  const requestId = resolveRequestId(request.headers);
+  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized", requestId);
   if (sessionOrResponse instanceof NextResponse) {
-    return sessionOrResponse;
+    return withRequestId(sessionOrResponse, requestId);
   }
 
   const payload = await request
@@ -35,13 +38,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const parsed = answerSchema.safeParse(payload);
 
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "Invalid request",
-        details: parsed.error.flatten().fieldErrors
-      },
-      { status: 400 }
-    );
+    return jsonError({
+      code: "validation.invalid_request",
+      message: "Invalid request",
+      status: 400,
+      details: parsed.error.flatten().fieldErrors,
+      requestId
+    });
   }
 
   try {
@@ -49,10 +52,11 @@ export async function POST(request: NextRequest, { params }: Params) {
       researchId: params.id,
       ownerUid: sessionOrResponse.uid,
       answer: parsed.data.answer,
-      questionIndex: parsed.data.questionIndex
+      questionIndex: parsed.data.questionIndex,
+      requestId
     });
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         item: serializeResearch(result.research),
         nextQuestion: result.nextQuestion,
@@ -60,20 +64,31 @@ export async function POST(request: NextRequest, { params }: Params) {
       },
       { status: 200 }
     );
+    return withRequestId(response, requestId);
   } catch (error) {
     if (error instanceof Error && "statusCode" in error) {
       const status = (error as { statusCode: number }).statusCode;
-      return NextResponse.json({ error: error.message }, { status });
+      return jsonError({
+        code: "research.refinement.failed",
+        message: error.message,
+        status,
+        requestId,
+        meta: { researchId: params.id }
+      });
     }
 
     logger.error("api.research.answer.unexpected", {
       researchId: params.id,
+      requestId,
       error: error instanceof Error ? error.message : String(error)
     });
 
-    return NextResponse.json(
-      { error: "Failed to submit refinement answer" },
-      { status: 502 }
-    );
+    return jsonError({
+      code: "research.refinement.unexpected",
+      message: "Failed to submit refinement answer",
+      status: 502,
+      requestId,
+      meta: { researchId: params.id }
+    });
   }
 }

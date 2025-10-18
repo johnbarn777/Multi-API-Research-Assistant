@@ -1,9 +1,13 @@
+import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { buildResearchPdf } from "../../src/lib/pdf/builder";
+import type { ListResearchResponse, ResearchListItem } from "../../src/types/api";
+import type { ResearchStatus } from "../../src/types/research";
 import { SAMPLE_PDF_PAYLOAD } from "../../src/tests/fixtures/researchReport";
 
 const DEV_BYPASS_ENABLED =
   process.env.DEV_AUTH_BYPASS === "true" || process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
+
 
 test.describe("Research flow", () => {
   test.beforeEach(async ({ context }) => {
@@ -28,6 +32,53 @@ test.describe("Research flow", () => {
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   });
 
+  test("dashboard displays research history with correct ordering", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    await seedDashboardFixture(page);
+    await page.goto("/dashboard");
+
+    const cards = page.locator("article");
+    await expect(cards).toHaveCount(DEFAULT_DASHBOARD_FIXTURE.items.length);
+
+    await expect(cards.nth(0)).toContainText("Completed session");
+    await expect(cards.nth(0)).toContainText("Completed");
+
+    await expect(cards.nth(1)).toContainText("Running session");
+    await expect(cards.nth(1)).toContainText("Running");
+
+    await expect(cards.nth(2)).toContainText("Awaiting refinements");
+    await expect(cards.nth(2)).toContainText("Awaiting Refinements");
+
+    await expect(page.getByRole("link", { name: "Load older sessions" })).toHaveCount(0);
+  });
+  test("dashboard passes automated accessibility checks", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    await seedDashboardFixture(page);
+    await page.goto("/dashboard");
+
+    const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibilityScanResults.violations,
+      JSON.stringify(accessibilityScanResults.violations, null, 2)
+    ).toEqual([]);
+  });
+  test.describe("mobile layout", () => {
+    test.use({ viewport: { width: 375, height: 812 } });
+
+    test("dashboard avoids horizontal scrolling on mobile", async ({ page }) => {
+      test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+      await seedDashboardFixture(page);
+      await page.goto("/dashboard");
+
+      const hasOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+      );
+      expect(hasOverflow).toBe(false);
+    });
+  });
   test("user can start a research session and see the first refinement question", async ({ page }) => {
     test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
 
@@ -35,11 +86,11 @@ test.describe("Research flow", () => {
     const timestamp = new Date("2024-01-01T00:00:00.000Z").toISOString();
     const refinementQuestion = "What is the primary outcome you want this research to achieve?";
 
-    const researchPayload = {
+    const researchPayload: ResearchListItem = {
       id: researchId,
       ownerUid: "e2e-user",
       title: "AI readiness in healthcare",
-      status: "refining",
+      status: "refining" as ResearchStatus,
       dr: {
         sessionId: "session-e2e-abc",
         questions: [{ index: 1, text: refinementQuestion }],
@@ -107,6 +158,12 @@ test.describe("Research flow", () => {
     await expect(page.getByText("Question 1 of 1")).toBeVisible();
     await expect(page.getByText(refinementQuestion)).toBeVisible();
     await expect(page.getByRole("textbox")).toBeEnabled();
+
+    const accessibilityScanResults = await new AxeBuilder({ page }).analyze();
+    expect(
+      accessibilityScanResults.violations,
+      JSON.stringify(accessibilityScanResults.violations, null, 2)
+    ).toEqual([]);
   });
 
   test("user completes multi-question refinement and reaches ready-to-run state", async ({ page }) => {
@@ -117,11 +174,11 @@ test.describe("Research flow", () => {
     const secondQuestion = "What specific audience should this research prioritize?";
     const finalPrompt = "Investigate climate tech adoption barriers for mid-market manufacturers.";
 
-    let currentResearch = {
+    let currentResearch: ResearchListItem = {
       id: researchId,
       ownerUid: "e2e-user",
       title: "Climate strategy enablement",
-      status: "refining",
+      status: "refining" as ResearchStatus,
       dr: {
         sessionId: "session-e2e-xyz",
         questions: [{ index: 1, text: "What is the core outcome you expect?" }],
@@ -182,7 +239,7 @@ test.describe("Research flow", () => {
             ...currentResearch.dr,
             answers: [{ index: 1, answer: payload.answer }],
             questions: [
-              ...currentResearch.dr.questions,
+              ...(currentResearch.dr.questions ?? []),
               { index: 2, text: secondQuestion }
             ]
           },
@@ -203,11 +260,11 @@ test.describe("Research flow", () => {
 
       currentResearch = {
         ...currentResearch,
-        status: "ready_to_run",
+        status: "ready_to_run" as ResearchStatus,
         dr: {
           ...currentResearch.dr,
           answers: [
-            ...currentResearch.dr.answers.filter((answer) => answer.index !== 2),
+            ...(currentResearch.dr.answers ?? []).filter((answer) => answer.index !== 2),
             { index: 2, answer: payload.answer }
           ],
           finalPrompt
@@ -260,11 +317,11 @@ test.describe("Research flow", () => {
     const timestamp = new Date("2024-01-03T00:00:00.000Z").toISOString();
     const finalPrompt = "Assess AI adoption patterns in sustainable supply chains.";
 
-    let currentResearch = {
+    let currentResearch: ResearchListItem = {
       id: researchId,
       ownerUid: "e2e-user",
       title: "AI adoption tracking",
-      status: "ready_to_run",
+      status: "ready_to_run" as ResearchStatus,
       dr: {
         sessionId: "session-run-123",
         questions: [],
@@ -317,9 +374,9 @@ test.describe("Research flow", () => {
         return;
       }
 
-      const runningState = {
+      const runningState: ResearchListItem = {
         ...currentResearch,
-        status: "running",
+        status: "running" as ResearchStatus,
         dr: {
           ...currentResearch.dr,
           status: "running",
@@ -346,7 +403,7 @@ test.describe("Research flow", () => {
       setTimeout(() => {
         currentResearch = {
           ...runningState,
-          status: "completed",
+          status: "completed" as ResearchStatus,
           dr: {
             ...runningState.dr,
             status: "success",
@@ -450,11 +507,11 @@ test.describe("Research flow", () => {
     const researchId = "research-e2e-email-success";
     const timestamp = new Date("2024-01-03T00:00:00.000Z").toISOString();
 
-    const researchPayload = {
+    const researchPayload: ResearchListItem = {
       id: researchId,
       ownerUid: "e2e-user",
       title: "Email Delivery Success",
-      status: "completed",
+      status: "completed" as ResearchStatus,
       dr: {
         status: "success"
       },
@@ -494,11 +551,11 @@ test.describe("Research flow", () => {
     const researchId = "research-e2e-email-failure";
     const timestamp = new Date("2024-01-04T00:00:00.000Z").toISOString();
 
-    const researchPayload = {
+    const researchPayload: ResearchListItem = {
       id: researchId,
       ownerUid: "e2e-user",
       title: "Email Delivery Failure",
-      status: "completed",
+      status: "completed" as ResearchStatus,
       dr: {
         status: "success"
       },
@@ -535,3 +592,57 @@ test.describe("Research flow", () => {
     await expect(page.getByText(/Reason: SendGrid unavailable/i)).toBeVisible();
   });
 });
+
+const DEFAULT_DASHBOARD_FIXTURE: ListResearchResponse = {
+  items: [
+    {
+      id: "research-done",
+      ownerUid: "e2e-user",
+      title: "Completed session",
+      status: "completed" as ResearchStatus,
+      dr: { status: "success" },
+      gemini: { status: "success" },
+      report: {},
+      createdAt: "2024-01-03T10:00:00.000Z",
+      updatedAt: "2024-01-03T10:30:00.000Z"
+    },
+    {
+      id: "research-running",
+      ownerUid: "e2e-user",
+      title: "Running session",
+      status: "running" as ResearchStatus,
+      dr: { status: "running" },
+      gemini: { status: "queued" },
+      report: {},
+      createdAt: "2024-01-02T09:00:00.000Z",
+      updatedAt: "2024-01-02T09:15:00.000Z"
+    },
+    {
+      id: "research-awaiting",
+      ownerUid: "e2e-user",
+      title: "Awaiting refinements",
+      status: "awaiting_refinements" as ResearchStatus,
+      dr: { status: "idle" },
+      gemini: { status: "idle" },
+      report: {},
+      createdAt: "2024-01-01T08:00:00.000Z",
+      updatedAt: "2024-01-01T08:05:00.000Z"
+    }
+  ],
+  nextCursor: null
+};
+
+async function seedDashboardFixture(page: import("@playwright/test").Page) {
+  const encodedFixture = Buffer.from(JSON.stringify(DEFAULT_DASHBOARD_FIXTURE), "utf8").toString(
+    "base64"
+  );
+
+  await page.context().addCookies([
+    {
+      name: "__dashboard_fixture",
+      value: encodedFixture,
+      url: "http://localhost:3000",
+      path: "/"
+    }
+  ]);
+}

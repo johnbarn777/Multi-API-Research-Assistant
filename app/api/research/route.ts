@@ -6,6 +6,8 @@ import { getResearchRepository } from "@/server/repositories/researchRepository"
 import { z } from "zod";
 import { logger } from "@/lib/utils/logger";
 import { serializeResearch } from "@/server/serializers/research";
+import { jsonError } from "@/server/http/jsonError";
+import { resolveRequestId, withRequestId } from "@/server/http/requestContext";
 
 const createResearchSchema = z.object({
   title: z
@@ -15,9 +17,10 @@ const createResearchSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
-  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized");
+  const requestId = resolveRequestId(request.headers);
+  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized", requestId);
   if (sessionOrResponse instanceof NextResponse) {
-    return sessionOrResponse;
+    return withRequestId(sessionOrResponse, requestId);
   }
 
   const searchParams = request.nextUrl.searchParams;
@@ -25,16 +28,18 @@ export async function GET(request: NextRequest) {
   const cursorParam = searchParams.get("cursor");
 
   let limit: number | undefined;
-  if (limitParam) {
-    const parsedLimit = Number(limitParam);
-    if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) {
-      return NextResponse.json(
-        { error: "Invalid limit parameter. Must be an integer between 1 and 50." },
-        { status: 400 }
-      );
+    if (limitParam) {
+      const parsedLimit = Number(limitParam);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 50) {
+        return jsonError({
+          code: "research.list.invalid_limit",
+          message: "Invalid limit parameter. Must be an integer between 1 and 50.",
+          status: 400,
+          requestId
+        });
+      }
+      limit = parsedLimit;
     }
-    limit = parsedLimit;
-  }
 
   const repository = getResearchRepository();
 
@@ -44,17 +49,23 @@ export async function GET(request: NextRequest) {
       cursor: cursorParam
     });
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         items: items.map(serializeResearch),
         nextCursor
       },
       { status: 200 }
     );
+    return withRequestId(response, requestId);
   } catch (error) {
     if (error instanceof Error && "statusCode" in error) {
       const status = (error as { statusCode: number }).statusCode;
-      return NextResponse.json({ error: error.message }, { status });
+      return jsonError({
+        code: "research.list.failed",
+        message: error.message,
+        status,
+        requestId
+      });
     }
 
     throw error;
@@ -62,9 +73,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized");
+  const requestId = resolveRequestId(request.headers);
+  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized", requestId);
   if (sessionOrResponse instanceof NextResponse) {
-    return sessionOrResponse;
+    return withRequestId(sessionOrResponse, requestId);
   }
 
   const payload = await request
@@ -74,30 +86,40 @@ export async function POST(request: NextRequest) {
   const parsed = createResearchSchema.safeParse(payload);
 
   if (!parsed.success) {
-    return NextResponse.json(
-      {
-        error: "Invalid request",
-        details: parsed.error.flatten().fieldErrors
-      },
-      { status: 400 }
-    );
+    return jsonError({
+      code: "validation.invalid_request",
+      message: "Invalid request",
+      status: 400,
+      details: parsed.error.flatten().fieldErrors,
+      requestId
+    });
   }
 
   const repository = getResearchRepository();
   const title = parsed.data.title.trim();
 
+  logger.info("api.research.create.start", {
+    requestId,
+    ownerUid: sessionOrResponse.uid,
+    titleLength: title.length
+  });
+
   const openAiSession = await startOpenAiSession({ topic: title }).catch((error) => {
     logger.error("api.research.start_session_failed", {
+      requestId,
+      ownerUid: sessionOrResponse.uid,
       error: error instanceof Error ? error.message : String(error)
     });
     return null;
   });
 
   if (!openAiSession) {
-    return NextResponse.json(
-      { error: "Failed to start OpenAI Deep Research session" },
-      { status: 502 }
-    );
+    return jsonError({
+      code: "research.create.openai_start_failed",
+      message: "Failed to start OpenAI Deep Research session",
+      status: 502,
+      requestId
+    });
   }
 
   try {
@@ -111,16 +133,29 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json(
+    logger.info("api.research.create.success", {
+      requestId,
+      ownerUid: sessionOrResponse.uid,
+      researchId: created.id,
+      initialQuestionCount: openAiSession.questions.length
+    });
+
+    const response = NextResponse.json(
       {
         item: serializeResearch(created)
       },
       { status: 201 }
     );
+    return withRequestId(response, requestId);
   } catch (error) {
     if (error instanceof Error && "statusCode" in error) {
       const status = (error as { statusCode: number }).statusCode;
-      return NextResponse.json({ error: error.message }, { status });
+      return jsonError({
+        code: "research.create.failed",
+        message: error.message,
+        status,
+        requestId
+      });
     }
 
     throw error;

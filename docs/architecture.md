@@ -28,11 +28,12 @@
 - `middleware.ts` executes on every request (except public paths) and verifies Firebase ID tokens supplied via `Authorization: Bearer`, `x-firebase-id-token`, or supported session cookies. The middleware performs verification via Firebase's Identity Toolkit REST API so it can run inside the Edge runtime (avoiding the `firebase-admin` Node dependency). When verification succeeds it injects `x-user-uid`, `x-user-email`, and `x-firebase-id-token` headers before forwarding the request.
 - API routes leverage `src/server/auth/session.ts` helpers (`ensureAuthenticated`, `requireAuth`) to read the injected headers and short-circuit unauthorized calls with a `401` JSON response.
 - Page requests without valid credentials are redirected to `/sign-in?redirectedFrom=<path>`.
+- The root route is no longer public; `app/page.tsx` performs a server-side redirect to `/dashboard` for authenticated users, while unauthenticated visitors are diverted to `/sign-in` by the middleware.
 - The React tree is wrapped with `AuthProvider` from `src/lib/firebase/auth-context.tsx` so client components can call `useAuth()` for loading state, the current Firebase user, and the latest ID token.
 - `AuthProvider` mirrors refreshed ID tokens into a `firebaseToken` cookie (1-hour max-age, `SameSite=Strict`) so middleware can authenticate soft navigations without extra API calls.
 - `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` after success.
 - Local development can opt into a synthetic session by setting `DEV_AUTH_BYPASS=true` (and optional UID/email overrides). When active in non-production environments, the middleware injects those headers without hitting Firebase so `pnpm dev` can render authenticated pages.
-- A global `AppHeader` client component renders on every route, surfacing the current auth state via `UserMenu`. This control shows the signed-in user (name/email/avatar when available), provides a direct link back to `/sign-in` when unauthenticated, and invokes Firebase `signOut` before redirecting to `/sign-in` so demo sessions can be closed explicitly.
+- A global `AppHeader` client component renders on every route, surfacing the current auth state via `UserMenu`. This control now exposes a skip link to `#main-content`, maintains 44px tap targets, provides a direct link back to `/sign-in` when unauthenticated, and invokes Firebase `signOut` before redirecting to `/sign-in` so demo sessions can be closed explicitly.
 
 ## Data Access Layer
 
@@ -43,8 +44,9 @@
 
 ## Client Data Fetching & Optimistic UI
 
-- Dashboard and creation flows use SWR with the Firebase ID token in the cache key so per-user data remains isolated.
-- `useResearchList` provides the paginated list (default page size 20) and exposes `mutate` for optimistic updates.
+- `app/dashboard/page.tsx` is a server component that calls `/api/research` with the authenticated request headers. It renders loading skeletons via `app/dashboard/loading.tsx`, surfaces empty/error states, and honours pagination through querystring cursors. Non-production environments can supply a base64-encoded `__dashboard_fixture` cookie to inject fixture data for automated tests without touching production behaviour.
+- `app/dashboard/page.tsx` is a server component that calls `/api/research` with the authenticated request headers. It renders loading skeletons via `app/dashboard/loading.tsx`, surfaces empty/error states, and honours pagination through querystring cursors. Non-production environments can supply a base64-encoded `__dashboard_fixture` cookie to inject fixture data for automated tests without touching production behaviour. It pairs with `ResearchCardList` to maintain 44px tap targets, skip-link focus management, and responsive layouts validated at 375px width via Playwright + axe-core.
+- `useResearchList` remains available for client flows (e.g., optimistic cache updates after creation) and still exposes `mutate` alongside the default page size of 20.
 - Creating a research session calls `createResearch` helper, then prepends the returned item to the SWR cache before revalidating in the background.
 - Research detail views rely on `useResearchDetail`, fetching `/api/research/:id` to surface the latest refinement questions immediately after creation. The hook now refreshes every ~2.5s while a run is `running` so provider progress badges update without a manual reload.
 - Errors from `/api/research` surface through a shared `ApiError` class so UI components can render consistent messaging.
@@ -58,13 +60,16 @@
 - **Firestore Indexes** – `research` collection indexes `(ownerUid ASC, createdAt DESC, __name__ DESC)` via `firestore.indexes.json` (deployed 2025-10-15).
 - **Firestore Rules** – `firestore.rules` locks access to authenticated users’ own `users/{uid}` and `research/{id}` documents; deployed with the CLI alongside indexes on 2025-10-15.
 - **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
+- **CI** – `.github/workflows/ci.yml` runs lint, type-check, Vitest (unit/integration), and Playwright (including axe-core audits) on pushes and pull requests.
 
 ## Observability
 
-- Structured JSON logging (`src/lib/utils/logger.ts`) to pipe context (request id, research id, provider).
+- Structured JSON logging (`src/lib/utils/logger.ts`) to pipe context (request id, research id, provider). `resolveRequestId`
+  extracts/creates correlation IDs and API responses echo them via `X-Request-Id` using `withRequestId`.
 - Provider integrations emit `provider.request.*` and `gemini.generate.*` logs around retries/poll attempts so transient
-  failures are traceable; exponential backoff (max 3 attempts per HTTP request) is built into both OpenAI Deep Research and
-  Gemini wrappers.
+  failures are traceable; exponential backoff (max 3 attempts per HTTP request) is centralized in `src/lib/utils/retry.ts` and
+  reused by OpenAI, Gemini, and Gmail delivery.
+- API routes return a consistent `{ code, message, retryAfterMs?, requestId }` envelope via `src/server/http/jsonError.ts`.
 - Surface metrics (counts by status, duration averages) using a future instrumentation layer or third-party service.
 
 ## TODO Highlights

@@ -12,6 +12,16 @@ import {
 import { getClientAuth } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/firebase/auth-context";
 
+type RouterReplaceTarget = Parameters<ReturnType<typeof useRouter>["replace"]>[0];
+
+function resolveTargetRoute(redirectedFrom: string | null): RouterReplaceTarget {
+  const fallback: RouterReplaceTarget = "/dashboard";
+  if (!redirectedFrom || redirectedFrom === "/sign-in") {
+    return fallback;
+  }
+  return redirectedFrom as RouterReplaceTarget;
+}
+
 export default function SignInPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -25,8 +35,7 @@ export default function SignInPage() {
     }
 
     const redirectedFrom = searchParams.get("redirectedFrom");
-    const target =
-      redirectedFrom && redirectedFrom !== "/sign-in" ? redirectedFrom : "/dashboard";
+    const target = resolveTargetRoute(redirectedFrom);
     router.replace(target);
   }, [loading, user, router, searchParams]);
 
@@ -44,10 +53,7 @@ export default function SignInPage() {
       await result.user.getIdToken(true);
 
       const redirectedFrom = searchParams.get("redirectedFrom");
-      const target =
-        redirectedFrom && redirectedFrom !== "/sign-in"
-          ? redirectedFrom
-          : "/dashboard";
+      const target = resolveTargetRoute(redirectedFrom);
 
       router.replace(target);
       router.refresh();

@@ -1,6 +1,7 @@
 import { getServerEnv } from "@/config/env";
-import { normalizeGeminiResult } from "@/lib/providers/normalizers";
+import { normalizeGeminiResult, type GeminiGenerateContentPayload } from "@/lib/providers/normalizers";
 import { logger } from "@/lib/utils/logger";
+import { NonRetryableError, retryWithBackoff, wait } from "@/lib/utils/retry";
 import type { ProviderResult } from "@/types/research";
 
 interface GenerateContentOptions {
@@ -40,12 +41,6 @@ function toGeminiOperationResponse(value: unknown): GeminiOperationResponse {
   return isRecord(value) ? (value as GeminiOperationResponse) : {};
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 async function fetchWithRetry(
   url: string,
   init: RequestInit,
@@ -55,67 +50,66 @@ async function fetchWithRetry(
     initialDelayMs = 500
   }: { operation: string; maxAttempts?: number; initialDelayMs?: number }
 ): Promise<Response> {
-  let attempt = 0;
-  let delay = initialDelayMs;
-  let lastError: unknown;
+  try {
+    return await retryWithBackoff(
+      async () => {
+        const response = await fetch(url, init);
+        if (!response.ok) {
+          const shouldRetry = RETRYABLE_STATUS_CODES.has(response.status);
+          const errorBody = await safeJson(response);
+          const baseMessage = `Gemini ${operation} failed with status ${response.status}`;
+          if (!shouldRetry) {
+            throw new NonRetryableError(`${baseMessage}: ${JSON.stringify(errorBody)}`, {
+              cause: { status: response.status, body: errorBody }
+            });
+          }
 
-  while (attempt < maxAttempts) {
-    try {
-      const response = await fetch(url, init);
-      if (!response.ok) {
-        const shouldRetry = RETRYABLE_STATUS_CODES.has(response.status);
-        const errorBody = await safeJson(response);
-        if (!shouldRetry) {
-          throw new Error(
-            `Gemini ${operation} failed with status ${response.status}: ${JSON.stringify(errorBody)}`
-          );
+          const retryError = new Error(`${baseMessage}; retrying`);
+          Object.assign(retryError, {
+            status: response.status,
+            body: errorBody
+          });
+          throw retryError;
         }
 
-        throw new FetchRetryError(response.status, errorBody);
-      }
-
-      return response;
-    } catch (error) {
-      lastError = error;
-      attempt += 1;
-
-      if (attempt >= maxAttempts) {
-        break;
-      }
-
-      logger.warn("gemini.request.retry", {
-        operation,
-        attempt,
+        return response;
+      },
+      {
         maxAttempts,
-        delayMs: delay,
-        error: error instanceof Error ? error.message : String(error)
-      });
+        initialDelayMs,
+        onRetry: (error, context) => {
+          logger.warn("gemini.request.retry", {
+            operation,
+            attempt: context.attempt,
+            maxAttempts: context.maxAttempts,
+            delayMs: context.delayMs,
+            error: error instanceof Error ? error.message : String(error),
+            ...(error && typeof error === "object" && "status" in error
+              ? { status: (error as { status?: number }).status }
+              : {})
+          });
+        }
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : `Gemini ${operation} failed after ${maxAttempts} attempts`;
 
-      await sleep(delay);
-      delay *= 2;
-    }
-  }
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? (error as { status?: number }).status
+        : undefined;
 
-  const message =
-    lastError instanceof Error
-      ? lastError.message
-      : `Gemini ${operation} failed after ${maxAttempts} attempts`;
-  logger.error("gemini.request.failed", {
-    operation,
-    attempts: maxAttempts,
-    error: message
-  });
-  throw lastError instanceof Error ? lastError : new Error(message);
-}
+    logger.error("gemini.request.failed", {
+      operation,
+      attempts: maxAttempts,
+      error: message,
+      ...(typeof status === "number" ? { status } : {})
+    });
 
-class FetchRetryError extends Error {
-  status: number;
-  body: unknown;
-
-  constructor(status: number, body: unknown) {
-    super(`Retryable HTTP error ${status}`);
-    this.status = status;
-    this.body = body;
+    throw error instanceof Error ? error : new Error(message);
   }
 }
 
@@ -244,7 +238,7 @@ export async function pollOperation(
       break;
     }
 
-    await sleep(delay);
+    await wait(delay);
     delay *= 2;
   }
 

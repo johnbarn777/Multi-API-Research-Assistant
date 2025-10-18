@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { ensureAuthenticated } from "@/server/auth/session";
 import { getResearchRepository } from "@/server/repositories/researchRepository";
 import { serializeResearch } from "@/server/serializers/research";
+import { jsonError } from "@/server/http/jsonError";
+import { resolveRequestId, withRequestId } from "@/server/http/requestContext";
 
 type Params = {
   params: {
@@ -11,9 +13,10 @@ type Params = {
 };
 
 export async function GET(request: NextRequest, { params }: Params) {
-  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized");
+  const requestId = resolveRequestId(request.headers);
+  const sessionOrResponse = ensureAuthenticated(request, "Unauthorized", requestId);
   if (sessionOrResponse instanceof NextResponse) {
-    return sessionOrResponse;
+    return withRequestId(sessionOrResponse, requestId);
   }
 
   const repository = getResearchRepository();
@@ -22,19 +25,32 @@ export async function GET(request: NextRequest, { params }: Params) {
     const research = await repository.getById(params.id, { ownerUid: sessionOrResponse.uid });
 
     if (!research) {
-      return NextResponse.json({ error: "Research not found" }, { status: 404 });
+      return jsonError({
+        code: "research.not_found",
+        message: "Research not found",
+        status: 404,
+        requestId,
+        meta: { researchId: params.id }
+      });
     }
 
-    return NextResponse.json(
+    const response = NextResponse.json(
       {
         item: serializeResearch(research)
       },
       { status: 200 }
     );
+    return withRequestId(response, requestId);
   } catch (error) {
     if (error instanceof Error && "statusCode" in error) {
       const status = (error as { statusCode: number }).statusCode;
-      return NextResponse.json({ error: error.message }, { status });
+      return jsonError({
+        code: "research.detail.failed",
+        message: error.message,
+        status,
+        requestId,
+        meta: { researchId: params.id }
+      });
     }
 
     throw error;

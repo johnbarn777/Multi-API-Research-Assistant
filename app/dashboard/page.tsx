@@ -1,132 +1,168 @@
-"use client";
-
-import clsx from "clsx";
-import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
-import { useMemo } from "react";
-import { useAuth } from "@/lib/firebase/auth-context";
-import { useResearchList } from "@/hooks/useResearchList";
-import type { ResearchStatus } from "@/types/research";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { AUTH_HEADER_TOKEN } from "@/server/auth/session";
+import { ResearchCardList } from "@/components/research/ResearchCardList";
+import type { ListResearchResponse } from "@/types/api";
 
-const STATUS_STYLES: Record<ResearchStatus, string> = {
-  awaiting_refinements: "border-amber-500/70 text-amber-300",
-  refining: "border-blue-500/70 text-blue-300",
-  ready_to_run: "border-indigo-500/70 text-indigo-300",
-  running: "border-cyan-500/70 text-cyan-300",
-  completed: "border-emerald-500/70 text-emerald-300",
-  failed: "border-rose-500/70 text-rose-300"
-};
+const PAGE_SIZE = 20;
 
-function formatStatus(status: ResearchStatus) {
-  return status
-    .split("_")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
+class DashboardDataError extends Error {}
 
-function getCreatedLabel(iso: string) {
-  const createdDate = new Date(iso);
-  if (Number.isNaN(createdDate.getTime())) {
-    return "Unknown date";
+function buildBaseUrl(headerList: Headers) {
+  const host = headerList.get("host");
+  if (!host) {
+    throw new DashboardDataError("Unable to determine request host.");
   }
 
-  return `${formatDistanceToNow(createdDate, { addSuffix: true })}`;
+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
+  return `${protocol}://${host}`;
 }
 
-export default function DashboardPage() {
-  const { loading: authLoading } = useAuth();
-  const { items, isLoading, error } = useResearchList();
+async function fetchResearchPage(cursor?: string): Promise<ListResearchResponse> {
+  const cookieStore = cookies();
+  const fixtureCookie =
+    process.env.NODE_ENV !== "production" ? cookieStore.get("__dashboard_fixture") : null;
 
-  const showSkeleton = authLoading || isLoading;
-  const empty = !showSkeleton && items.length === 0 && !error;
+  if (fixtureCookie?.value) {
+    try {
+      const decoded = Buffer.from(fixtureCookie.value, "base64").toString("utf8");
+      const parsed = JSON.parse(decoded) as ListResearchResponse;
+      return parsed;
+    } catch {
+      // Ignore malformed fixtures and fall back to live data.
+    }
+  }
 
-  const sortedItems = useMemo(
-    () => [...items].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-    [items]
-  );
+  const headerList = headers();
+  const token = headerList.get(AUTH_HEADER_TOKEN);
+
+  if (!token) {
+    redirect("/sign-in?redirectedFrom=/dashboard");
+  }
+
+  const baseUrl = buildBaseUrl(headerList);
+  const url = new URL("/api/research", baseUrl);
+  url.searchParams.set("limit", String(PAGE_SIZE));
+  if (cursor) {
+    url.searchParams.set("cursor", cursor);
+  }
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    cache: "no-store",
+    next: {
+      revalidate: 0
+    }
+  });
+
+  if (response.status === 401) {
+    redirect("/sign-in?redirectedFrom=/dashboard");
+  }
+
+  if (!response.ok) {
+    let message = "Failed to load research sessions.";
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) {
+        message = body.error;
+      }
+    } catch {
+      // Ignore JSON parse errors; fall back to generic message.
+    }
+    throw new DashboardDataError(message);
+  }
+
+  return (await response.json()) as ListResearchResponse;
+}
+
+export const dynamic = "force-dynamic";
+
+interface DashboardPageProps {
+  searchParams?: {
+    cursor?: string | string[];
+  };
+}
+
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const cursorParam = searchParams?.cursor;
+  const cursor = Array.isArray(cursorParam) ? cursorParam[0] : cursorParam;
+
+  let data: ListResearchResponse = { items: [], nextCursor: null };
+  let errorMessage: string | null = null;
+
+  try {
+    data = await fetchResearchPage(cursor);
+  } catch (error) {
+    if (error instanceof DashboardDataError) {
+      errorMessage = error.message;
+    } else {
+      throw error;
+    }
+  }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-6 py-12">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <main
+      id="main-content"
+      className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-12"
+    >
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">Dashboard</h1>
-          <p className="text-sm text-slate-400">
-            Track your research sessions, continue answering refinement questions, or jump back into completed reports.
+          <h1 className="text-3xl font-semibold text-white sm:text-4xl">Dashboard</h1>
+          <p className="mt-1 max-w-2xl text-sm text-slate-400 sm:text-base">
+            Track research progress, revisit refinement questions, and jump back into completed reports.
           </p>
         </div>
         <Link
           href="/research/new"
-          className="inline-flex items-center justify-center rounded-md bg-brand px-4 py-2 text-sm font-medium text-white transition hover:bg-brand/90"
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-brand px-4 text-sm font-semibold text-white transition hover:bg-brand/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:w-auto"
         >
           New Research
         </Link>
       </header>
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-6">
-        <header className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+
+      <section className="space-y-6 rounded-lg border border-slate-800 bg-slate-900/40 p-5 sm:p-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-white">Recent Research</h2>
-            <p className="text-sm text-slate-400">Newest sessions appear first. We keep snapshots of provider progress.</p>
+            <h2 className="text-lg font-semibold text-white sm:text-xl">Recent Research</h2>
+            <p className="mt-1 max-w-3xl text-sm text-slate-400">
+              Sessions are sorted by creation date. We keep provider snapshots so you can resume seamlessly.
+            </p>
           </div>
-          <Link href="/research/new" className="text-sm font-medium text-brand underline">
+          <Link
+            href="/research/new"
+            className="inline-flex min-h-[44px] items-center justify-center rounded-md border border-transparent px-3 text-sm font-semibold text-brand underline transition hover:text-brand/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:px-4"
+          >
             Start another
           </Link>
         </header>
-        {error ? (
+
+        {errorMessage ? (
           <div className="rounded-md border border-rose-500/60 bg-rose-500/10 p-4 text-sm text-rose-200">
-            {error instanceof Error ? error.message : "Failed to load research sessions."}
+            {errorMessage}
           </div>
         ) : null}
-        {showSkeleton ? (
-          <ul className="space-y-3">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <li
-                // eslint-disable-next-line react/no-array-index-key
-                key={index}
-                className="animate-pulse rounded-md border border-slate-800 bg-slate-900/50 p-4"
-              >
-                <div className="mb-3 h-4 w-2/3 rounded bg-slate-800" />
-                <div className="h-3 w-1/3 rounded bg-slate-800" />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {empty ? (
-          <div className="rounded-md border border-slate-800 bg-slate-900/60 p-6 text-sm text-slate-400">
-            You have not created any research sessions yet. Start one to see it appear here instantly.
+
+        <ResearchCardList
+          items={data.items}
+          emptyMessage="You have not created any research sessions yet. Start one to see it appear here instantly."
+          emptyAction={{
+            href: "/research/new",
+            label: "Start your first research"
+          }}
+        />
+
+        {data.nextCursor && data.items.length > 0 ? (
+          <div className="flex justify-end">
+            <Link
+              href={`/dashboard?cursor=${encodeURIComponent(data.nextCursor)}`}
+              className="inline-flex min-h-[44px] items-center justify-center rounded-md border border-slate-700 px-4 text-sm font-semibold text-slate-200 transition hover:border-brand hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50"
+            >
+              Load older sessions
+            </Link>
           </div>
-        ) : null}
-        {!showSkeleton && !empty ? (
-          <ul className="space-y-3">
-            {sortedItems.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-col gap-3 rounded-md border border-slate-800 bg-slate-900/60 p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="space-y-1">
-                  <Link href={`/research/${item.id}`} className="font-semibold text-slate-100 hover:text-brand">
-                    {item.title}
-                  </Link>
-                  <p className="text-xs text-slate-500">Created {getCreatedLabel(item.createdAt)}</p>
-                </div>
-                <div className="flex flex-col gap-2 text-sm text-slate-400 sm:flex-row sm:items-center sm:gap-4">
-                  <span
-                    className={clsx(
-                      "inline-flex h-8 items-center justify-center rounded-full border px-4 text-xs uppercase tracking-wide",
-                      STATUS_STYLES[item.status]
-                    )}
-                  >
-                    {formatStatus(item.status)}
-                  </span>
-                  <Link
-                    href={`/research/${item.id}`}
-                    className="inline-flex items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 transition hover:border-brand hover:text-brand"
-                  >
-                    View details
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ul>
         ) : null}
       </section>
     </main>

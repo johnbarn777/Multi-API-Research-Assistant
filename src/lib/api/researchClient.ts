@@ -1,31 +1,11 @@
 "use client";
 
-import type {
-  ResearchProviderState,
-  ResearchReportState,
-  ResearchStatus
-} from "@/types/research";
-
-export interface ResearchItem {
-  id: string;
-  ownerUid: string;
-  title: string;
-  status: ResearchStatus;
-  dr: ResearchProviderState;
-  gemini: ResearchProviderState;
-  report: ResearchReportState;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ListResearchResponse {
-  items: ResearchItem[];
-  nextCursor: string | null;
-}
-
-export interface ResearchResponse {
-  item: ResearchItem;
-}
+import type { ListResearchResponse, ResearchResponse } from "@/types/api";
+export type {
+  ResearchListItem as ResearchItem,
+  ListResearchResponse,
+  ResearchResponse
+} from "@/types/api";
 
 export class ApiError extends Error {
   status: number;

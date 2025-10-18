@@ -39,6 +39,7 @@ type ProviderOutcome = ProviderOutcomeSuccess | ProviderOutcomeFailure;
 interface ScheduleResearchRunInput {
   researchId: string;
   ownerUid: string;
+  requestId?: string;
 }
 
 interface ScheduleResearchRunResult {
@@ -91,11 +92,13 @@ function resolveProviderPatch(outcome: ProviderOutcome): ResearchProviderState {
 async function runOpenAiProvider({
   researchId,
   sessionId,
-  prompt
+  prompt,
+  requestId
 }: {
   researchId: string;
   sessionId: string;
   prompt: string;
+  requestId?: string;
 }): Promise<ProviderOutcome> {
   const started = Date.now();
   const startedAt = new Date().toISOString();
@@ -103,7 +106,8 @@ async function runOpenAiProvider({
 
   try {
     logger.info("research.run.openai.start", {
-      researchId
+      researchId,
+      requestId
     });
 
     const execution = await executeOpenAiRun({
@@ -125,6 +129,7 @@ async function runOpenAiProvider({
 
     logger.info("research.run.openai.completed", {
       researchId,
+      requestId,
       runId: jobId
     });
 
@@ -144,6 +149,7 @@ async function runOpenAiProvider({
 
     logger.error("research.run.openai.failed", {
       researchId,
+      requestId,
       runId: jobId,
       error: message
     });
@@ -162,17 +168,20 @@ async function runOpenAiProvider({
 
 async function runGeminiProvider({
   researchId,
-  prompt
+  prompt,
+  requestId
 }: {
   researchId: string;
   prompt: string;
+  requestId?: string;
 }): Promise<ProviderOutcome> {
   const started = Date.now();
   const startedAt = new Date().toISOString();
 
   try {
     logger.info("research.run.gemini.start", {
-      researchId
+      researchId,
+      requestId
     });
 
     const result = await generateGeminiContent({
@@ -183,7 +192,8 @@ async function runGeminiProvider({
     const completedAt = new Date().toISOString();
 
     logger.info("research.run.gemini.completed", {
-      researchId
+      researchId,
+      requestId
     });
 
     return {
@@ -200,6 +210,7 @@ async function runGeminiProvider({
 
     logger.error("research.run.gemini.failed", {
       researchId,
+      requestId,
       error: message
     });
 
@@ -219,20 +230,27 @@ async function executeProviders({
   researchId,
   ownerUid,
   sessionId,
-  finalPrompt
+  finalPrompt,
+  requestId
 }: {
   repository: ResearchRepository;
   researchId: string;
   ownerUid: string;
   sessionId: string;
   finalPrompt: string;
+  requestId?: string;
 }): Promise<void> {
   let openAiOutcome: ProviderOutcome | null = null;
   let geminiOutcome: ProviderOutcome | null = null;
 
   try {
     const [openAiResult, geminiResult] = await Promise.all([
-      runOpenAiProvider({ researchId, sessionId, prompt: finalPrompt }).then(async (outcome) => {
+      runOpenAiProvider({
+        researchId,
+        sessionId,
+        prompt: finalPrompt,
+        requestId
+      }).then(async (outcome) => {
         openAiOutcome = outcome;
         await repository.update(
           researchId,
@@ -243,7 +261,7 @@ async function executeProviders({
         );
         return outcome;
       }),
-      runGeminiProvider({ researchId, prompt: finalPrompt }).then(async (outcome) => {
+      runGeminiProvider({ researchId, prompt: finalPrompt, requestId }).then(async (outcome) => {
         geminiOutcome = outcome;
         await repository.update(
           researchId,
@@ -262,6 +280,7 @@ async function executeProviders({
     const message = error instanceof Error ? error.message : "Provider execution failed";
     logger.error("research.run.providers.persist_failed", {
       researchId,
+      requestId,
       error: message
     });
 
@@ -287,6 +306,7 @@ async function executeProviders({
       .catch((persistError) => {
         logger.error("research.run.providers.final_persist_failed", {
           researchId,
+          requestId,
           error: persistError instanceof Error ? persistError.message : String(persistError)
         });
       });
@@ -312,6 +332,7 @@ async function executeProviders({
   } catch (error) {
     logger.error("research.run.final_status_failed", {
       researchId,
+      requestId,
       nextStatus: finalStatus,
       error: error instanceof Error ? error.message : String(error)
     });
@@ -320,7 +341,8 @@ async function executeProviders({
 
 export async function scheduleResearchRun({
   researchId,
-  ownerUid
+  ownerUid,
+  requestId
 }: ScheduleResearchRunInput): Promise<ScheduleResearchRunResult> {
   const repository = getResearchRepository();
   const research = await repository.getById(researchId, { ownerUid });
@@ -331,7 +353,8 @@ export async function scheduleResearchRun({
 
   if (research.status === RUNNING_STATUS) {
     logger.info("research.run.already_running", {
-      researchId
+      researchId,
+      requestId
     });
     return {
       research,
@@ -387,15 +410,23 @@ export async function scheduleResearchRun({
     { ownerUid }
   );
 
+  logger.info("research.run.started", {
+    researchId,
+    ownerUid,
+    requestId
+  });
+
   void executeProviders({
     repository,
     researchId,
     ownerUid,
     sessionId,
-    finalPrompt
+    finalPrompt,
+    requestId
   }).catch((error) => {
     logger.error("research.run.unhandled_error", {
       researchId,
+      requestId,
       error: error instanceof Error ? error.message : String(error)
     });
   });

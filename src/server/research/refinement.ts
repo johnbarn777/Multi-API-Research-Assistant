@@ -13,6 +13,7 @@ export interface SubmitRefinementAnswerInput {
   ownerUid: string;
   answer: string;
   questionIndex: number;
+  requestId?: string;
 }
 
 export interface SubmitRefinementAnswerResult {
@@ -69,7 +70,8 @@ export async function submitRefinementAnswer({
   researchId,
   ownerUid,
   answer,
-  questionIndex
+  questionIndex,
+  requestId
 }: SubmitRefinementAnswerInput): Promise<SubmitRefinementAnswerResult> {
   const repository = getRepository();
   const research = await repository.getById(researchId, { ownerUid });
@@ -107,7 +109,8 @@ export async function submitRefinementAnswer({
   logger.info("research.refinement.submit", {
     researchId,
     ownerUid,
-    questionIndex
+    questionIndex,
+    requestId
   });
 
   const providerResponse = await submitOpenAiAnswer({
@@ -117,6 +120,15 @@ export async function submitRefinementAnswer({
 
   const nextQuestion = providerResponse.nextQuestion ?? null;
   const finalPrompt = providerResponse.finalPrompt?.trim() || null;
+
+  logger.info("research.refinement.provider_response", {
+    researchId,
+    ownerUid,
+    requestId,
+    questionIndex,
+    nextQuestionIndex: nextQuestion?.index ?? null,
+    finalPromptCaptured: Boolean(finalPrompt)
+  });
 
   const nextAnswers = upsertAnswer(research.dr.answers, {
     index: questionIndex,
@@ -142,6 +154,15 @@ export async function submitRefinementAnswer({
     },
     { ownerUid }
   );
+
+  logger.info("research.refinement.persisted", {
+    researchId,
+    ownerUid,
+    requestId,
+    nextStatus: status ?? research.status,
+    recordedAnswers: nextAnswers.length,
+    hasFinalPrompt: Boolean(finalPrompt)
+  });
 
   return {
     research: updated,
