@@ -61,6 +61,7 @@
 - **Firestore Rules** – `firestore.rules` locks access to authenticated users’ own `users/{uid}` and `research/{id}` documents; deployed with the CLI alongside indexes on 2025-10-15.
 - **Analytics** – `getClientAnalytics()` lazily loads Firebase Analytics once the browser environment is ready and a measurement ID is supplied.
 - **CI** – `.github/workflows/ci.yml` runs lint, type-check, Vitest (unit/integration), and Playwright (including axe-core audits) on pushes and pull requests.
+- **Playwright binaries** – Browser downloads are skipped when `CI`, `VERCEL`, or `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` is set. Run `pnpm playwright:install` locally before executing E2E tests to ensure the binaries exist.
 
 ## Demo Mode
 

@@ -49,6 +49,12 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
    pnpm install
    ```
 
+   Playwright browser binaries are skipped automatically in CI/hosted installs. Run the following once locally if you plan to execute E2E tests:
+
+   ```bash
+   pnpm playwright:install
+   ```
+
 2. **Set environment**
 
    ```bash

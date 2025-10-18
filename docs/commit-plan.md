@@ -187,3 +187,12 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 **Testing**
 - Unit: `tests/unit/env.test.ts` updated to cover the new flag (not yet re-run in this work session).
 - Integration/E2E: Not run; follow-up to exercise full flow once demo fixtures are merged.
+
+## Commit 14: CI-friendly Playwright install
+
+**Implementation Steps**
+- ~~Replace the unconditional `prepare` script with a guarded installer that skips Playwright browser downloads in CI/preview builds.~~
+- ~~Expose `pnpm playwright:install` for local setup and document the new flow (README + architecture notes).~~
+
+**Testing**
+- Manual verification required: run `pnpm playwright:install` locally before executing E2E suites.
