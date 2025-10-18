@@ -35,7 +35,7 @@ The same view now also exposes a “Download report PDF” action that calls the
 - The root route is no longer public; `app/page.tsx` performs a server-side redirect to `/dashboard` for authenticated users, while unauthenticated visitors are diverted to `/sign-in` by the middleware.
 - The React tree is wrapped with `AuthProvider` from `src/lib/firebase/auth-context.tsx` so client components can call `useAuth()` for loading state, the current Firebase user, and the latest ID token.
 - `AuthProvider` mirrors refreshed ID tokens into a `firebaseToken` cookie (1-hour max-age, `SameSite=Strict`) so middleware can authenticate soft navigations without extra API calls.
-- `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` after success.
+- `/sign-in` uses `signInWithPopup` with the Firebase Google provider, enforcing `browserLocalPersistence` and redirecting to the `redirectedFrom` query param or `/dashboard` (also used when redirecting from `/`) after success.
 - Local development can opt into a synthetic session by setting `DEV_AUTH_BYPASS=true` (and optional UID/email overrides). When active in non-production environments, the middleware injects those headers without hitting Firebase so `pnpm dev` can render authenticated pages.
 - A global `AppHeader` client component renders on every route, surfacing the current auth state via `UserMenu`. This control now exposes a skip link to `#main-content`, maintains 44px tap targets, provides a direct link back to `/sign-in` when unauthenticated, and invokes Firebase `signOut` before redirecting to `/sign-in` so demo sessions can be closed explicitly.
 

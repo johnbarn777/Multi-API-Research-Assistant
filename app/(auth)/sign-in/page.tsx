@@ -19,6 +19,9 @@ function resolveTargetRoute(redirectedFrom: string | null): RouterReplaceTarget 
   if (!redirectedFrom || redirectedFrom === "/sign-in") {
     return fallback;
   }
+  if (redirectedFrom === "/") {
+    return fallback;
+  }
   return redirectedFrom as RouterReplaceTarget;
 }
 
