@@ -120,6 +120,8 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Create `src/lib/pdf/builder.ts` using `pdf-lib` to assemble cover page, OpenAI section, Gemini section, metadata footer.~~ (`src/lib/pdf/builder.ts`)
 - ~~Implement utility to upload PDF to Firebase Storage (if configured) or return buffer path; update repository to store `report.pdfPath`.~~ (`src/lib/pdf/storage.ts`, `src/server/research/finalize.ts`, `app/api/research/[id]/finalize/route.ts`)
 - ~~Add unit-friendly sample data for deterministic PDF output and Byte signature tests.~~ (`src/tests/fixtures/researchReport.ts`)
+- 2025-10-19: Builder now normalizes provider Markdown before drawing so headings, bullet lists, blockquotes, and code fences render cleanly in the PDF (Helvetica/Bold/Oblique/Courier set embedded for formatting fidelity).
+- 2025-10-20: Long tokens (e.g., URLs) are force-wrapped, each page now draws a subtle border so report content respects the printable margins, and provider sections introduce “Executive Summary”/“Findings” with clickable source URLs.
 
 **Testing**
 - ~~Unit: Vitest verifying builder outputs `%PDF` header, includes section titles, and handles missing provider gracefully.~~ (`tests/unit/pdf/builder.test.ts`)
@@ -169,6 +171,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Unit: Tests for retry helper ensuring delay schedule and abort on non-retryable errors.~~ (`tests/unit/utils/retry.test.ts`)
 - ~~Integration: Supertest simulating provider 5xx responses to confirm retries logged and eventual success/failure matches spec.~~ (`tests/integration/provider-retry.test.ts`)
 - E2E: Not required (covered by previous flows).
+> Follow-up (2025-10-18): Sanitized provider payloads before persisting to Firestore so nested `undefined` values (e.g., `raw.output.sources`) no longer trigger document write failures during research runs.
 
 ## Commit 12: Accessibility, responsiveness, and CI coverage
 

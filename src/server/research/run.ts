@@ -7,6 +7,7 @@ import { generateContent as generateGeminiContent } from "@/lib/providers/gemini
 import { getDemoProviderResult } from "@/lib/demo/demoFixtures";
 import { logger } from "@/lib/utils/logger";
 import { wait } from "@/lib/utils/retry";
+import { sanitizeForFirestore } from "@/lib/firebase/sanitizeForFirestore";
 import {
   getResearchRepository,
   InvalidResearchStateError,
@@ -71,11 +72,25 @@ function sanitizeSessionId(sessionId: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function sanitizeProviderResult(result: ProviderResult): ProviderResult {
+  const sanitizedMeta = result.meta
+    ? (sanitizeForFirestore(result.meta) as ProviderResult["meta"])
+    : undefined;
+
+  const sanitizedRaw = sanitizeForFirestore(result.raw);
+
+  return {
+    ...result,
+    raw: sanitizedRaw ?? null,
+    meta: sanitizedMeta
+  };
+}
+
 function resolveProviderPatch(outcome: ProviderOutcome): ResearchProviderState {
   if (outcome.status === "success") {
     return {
       status: "success",
-      result: outcome.result,
+      result: sanitizeProviderResult(outcome.result),
       error: null,
       durationMs: outcome.durationMs,
       startedAt: outcome.startedAt,

@@ -148,7 +148,6 @@ describe("openaiDeepResearch provider", () => {
 
     expect(receivedBody.model).toBe("gpt-4.1-mini");
     expect(receivedBody.text?.format?.type).toBe("json_schema");
-    expect(receivedBody.text?.format?.name).toBe("deep_research_prompt");
     expect(receivedBody.text?.format?.name).toBe("clarification_questions");
     expect(receivedBody.background).toBeUndefined();
     expect(receivedBody.text?.format?.type).toBe("json_schema");

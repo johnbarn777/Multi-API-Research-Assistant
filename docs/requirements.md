@@ -494,10 +494,11 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * AC1: PDF contains cover + two sections with summaries, insights, sources.
 * AC2: Metadata (timestamps, duration) included.
 * AC3: PDF is generated server‑side and is downloadable.
+* AC4: Provider Markdown (headings, lists, blockquotes, code fences) renders without raw syntax artifacts in the PDF output.
 
 **Unit**
 
-* UT1: PDF builder renders section titles and lists given mock data. (Covered via `tests/unit/pdf/builder.test.ts`.)
+* UT1: PDF builder renders section titles, lists, and Markdown formatting given mock data. (Covered via `tests/unit/pdf/builder.test.ts`.)
 
 **Integration**
 
@@ -511,6 +512,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 
 * **Pass:** PDF structurally valid and content present.
 * **Fail:** Missing sections or invalid file.
+* **Status (2025-10-20):** Page frames now draw a subtle border, the text wrapper hard-breaks long tokens (such as URLs), and provider sections now render “Executive Summary”, “Findings → Key Insights/Primary Sources”, with source URLs exported as clickable links.
 
 ---
 
@@ -640,6 +642,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 
 * **AC:** Provider calls retried up to 3 times with backoff.
 * **Test:** Simulate transient 5xx → eventual success (`tests/integration/provider-retry.test.ts`).
+* **Status (2025-10-18):** Sanitizing provider payloads before Firestore writes prevents nested `undefined` values (e.g., `dr.result.raw.output.sources`) from causing persistence failures during research runs.
 
 ---
 

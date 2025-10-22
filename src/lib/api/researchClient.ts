@@ -19,11 +19,69 @@ export class ApiError extends Error {
   }
 }
 
+function extractFirstDetail(details: unknown): string | null {
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+
+  if (Array.isArray(details)) {
+    for (const item of details) {
+      const message = extractFirstDetail(item);
+      if (message) {
+        return message;
+      }
+    }
+    return null;
+  }
+
+  for (const value of Object.values(details as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        if (typeof entry === "string" && entry.trim()) {
+          return entry;
+        }
+      }
+    }
+    if (value && typeof value === "object") {
+      const nested = extractFirstDetail(value);
+      if (nested) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
 async function parseErrorResponse(response: Response, fallbackMessage: string) {
   try {
-    const body = (await response.json()) as { error?: string; details?: unknown };
+    const body = (await response.json()) as {
+      error?: string;
+      message?: string;
+      code?: string;
+      details?: unknown;
+    };
+
+    const detailMessage = extractFirstDetail(body.details);
+    const baseMessage = body.error ?? body.message ?? body.code ?? null;
+    let message: string;
+
+    if (detailMessage) {
+      if (baseMessage) {
+        const separator = baseMessage.endsWith(":") ? " " : ": ";
+        message = `${baseMessage}${separator}${detailMessage}`;
+      } else {
+        message = detailMessage;
+      }
+    } else {
+      message = baseMessage ?? fallbackMessage;
+    }
+
     return {
-      message: body.error ?? fallbackMessage,
+      message,
       details: body.details
     };
   } catch {

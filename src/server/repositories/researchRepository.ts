@@ -1,4 +1,5 @@
 import { adminDb } from "@/lib/firebase/admin";
+import { sanitizeForFirestore } from "@/lib/firebase/sanitizeForFirestore";
 import { ForbiddenError } from "@/server/auth/session";
 import { canTransition } from "@/server/research/state-machine";
 import type {
@@ -142,7 +143,7 @@ function mergeProviderState(
   }
 
   if (!patch) {
-    return normalizedCurrent;
+    return sanitizeProviderState(normalizedCurrent);
   }
 
   const normalizedPatch: Partial<ResearchProviderState> = {};
@@ -174,7 +175,32 @@ function mergeProviderState(
     delete (merged as Record<keyof ResearchProviderState, unknown>)[key];
   });
 
-  return merged;
+  return sanitizeProviderState(merged);
+}
+
+function sanitizeProviderState(state: ResearchProviderState): ResearchProviderState {
+  const sanitized = sanitizeForFirestore(state);
+
+  if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
+    return {
+      status: "idle",
+      error: null,
+      questions: [],
+      answers: []
+    };
+  }
+
+  const normalized = sanitized as Record<string, unknown>;
+
+  return {
+    ...(normalized as ResearchProviderState),
+    questions: Array.isArray(normalized.questions)
+      ? (normalized.questions as Array<{ index: number; text: string }>)
+      : [],
+    answers: Array.isArray(normalized.answers)
+      ? (normalized.answers as Array<{ index: number; answer: string }>)
+      : []
+  };
 }
 
 function sanitizeLimit(limit?: number): number {

@@ -88,4 +88,42 @@ describe("buildResearchPdf", () => {
     expect(content).toContain("No findings were recorded for this provider.");
     expect(content).toContain("OpenAI Deep Research");
   });
+
+  it("renders markdown content with headings, lists, blockquotes, and code blocks", async () => {
+    const markdownSummary = [
+      "# Overview",
+      "",
+      "## Key Points",
+      "- First **important** item",
+      "- Second item with [link](https://example.com)",
+      "",
+      "> Inspirational quote from the research narrative.",
+      "",
+      "```",
+      "const example = true;",
+      "console.log(example);",
+      "```"
+    ].join("\n");
+
+    const pdfBytes = await buildResearchPdf({
+      ...SAMPLE_PDF_PAYLOAD,
+      openAi: {
+        ...SAMPLE_OPENAI_RESULT,
+        summary: markdownSummary,
+        insights: [],
+        sources: []
+      },
+      gemini: null
+    });
+
+    const content = extractText(bufferFrom(pdfBytes));
+
+    expect(content).toContain("Overview");
+    expect(content).toContain("Key Points");
+    expect(content).toContain("First important item");
+    expect(content).toContain("Second item with link (https://example.com)");
+    expect(content).toContain("Inspirational quote from the research narrative.");
+    expect(content).toContain("const example = true;");
+    expect(content).not.toContain("# Overview");
+  });
 });
