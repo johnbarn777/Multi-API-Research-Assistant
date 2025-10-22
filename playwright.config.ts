@@ -13,6 +13,7 @@ const webServerEnv = {
   DEV_AUTH_BYPASS_UID: process.env.DEV_AUTH_BYPASS_UID ?? "e2e-user",
   DEV_AUTH_BYPASS_EMAIL: process.env.DEV_AUTH_BYPASS_EMAIL ?? "e2e@example.com",
   DEV_AUTH_BYPASS_TOKEN: process.env.DEV_AUTH_BYPASS_TOKEN ?? "playwright-stub-token",
+  DEMO_MODE: process.env.DEMO_MODE ?? "true",
   OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "test-openai-key",
   OPENAI_DR_BASE_URL: process.env.OPENAI_DR_BASE_URL ?? "https://api.openai.com/v1",
   GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "test-gemini-key",

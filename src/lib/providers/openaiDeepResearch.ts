@@ -1,4 +1,6 @@
-import { getServerEnv } from "@/config/env";
+import { randomUUID } from "crypto";
+
+import { getServerEnv, type ServerEnv } from "@/config/env";
 import {
   normalizeOpenAIDeepResearchResult,
   type OpenAIDeepResearchRunPayload
@@ -14,53 +16,78 @@ interface FetchWithRetryOptions {
   initialDelayMs?: number;
 }
 
+interface CreateResponseOptions {
+  env: ServerEnv;
+  model: string;
+  input: unknown;
+  instructions?: string;
+  tools?: Array<Record<string, unknown>>;
+  background?: boolean;
+  maxOutputTokens?: number;
+  responseFormat?: { type: string } & Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  reasoning?: Record<string, unknown>;
+}
+
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_INITIAL_DELAY_MS = 500;
+const MAX_CLARIFICATION_QUESTIONS = 3;
+const DEFAULT_CLARIFIER_MODEL = "gpt-4.1-mini";
+const DEFAULT_PROMPT_WRITER_MODEL = "gpt-4.1-mini";
+const DEFAULT_DEEP_RESEARCH_MODEL = "o4-mini-deep-research";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+type ClarifierSchema = {
+  questions: Array<{
+    question: string;
+  }>;
+};
+
+type PromptWriterSchema = {
+  final_prompt: string;
+};
+
+interface ResponsesOutputMessageContent {
+  type?: string;
+  text?: string;
 }
 
-function toTrimmedString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
+interface ResponsesOutputItem {
+  type?: string;
+  role?: string;
+  content?: ResponsesOutputMessageContent[];
+  [key: string]: unknown;
 }
 
-function toNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+interface OpenAIResponsesPayload {
+  id?: string;
+  status?: string;
+  model?: string;
+  usage?: {
+    total_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    reasoning_tokens?: number;
+  };
+  output?: ResponsesOutputItem[];
+  [key: string]: unknown;
 }
 
-function normalizeQuestionPayload(
-  question: unknown,
-  fallbackIndex: number
-): { index: number; text: string } | null {
-  if (typeof question === "string") {
-    const text = toTrimmedString(question);
-    return text ? { index: fallbackIndex, text } : null;
+function getBaseUrl(env: ServerEnv): string {
+  return env.OPENAI_DR_BASE_URL.replace(/\/$/, "");
+}
+
+function createHeaders(env: ServerEnv): HeadersInit {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    "Content-Type": "application/json",
+    Accept: "application/json"
+  };
+
+  if (env.OPENAI_PROJECT_ID) {
+    headers["OpenAI-Project"] = env.OPENAI_PROJECT_ID;
   }
 
-  if (isRecord(question)) {
-    const candidate = question as {
-      index?: unknown;
-      text?: unknown;
-      prompt?: unknown;
-    };
-    const text =
-      toTrimmedString(candidate.text) ?? toTrimmedString(candidate.prompt);
-    if (!text) {
-      return null;
-    }
-    const indexValue =
-      typeof candidate.index === "number" && Number.isFinite(candidate.index)
-        ? candidate.index
-        : fallbackIndex;
-    return { index: indexValue, text };
-  }
-
-  return null;
+  return headers;
 }
 
 async function fetchWithRetry(
@@ -141,11 +168,243 @@ async function safeJson(response: Response): Promise<unknown> {
       provider: "openai-deep-research",
       error: error instanceof Error ? error.message : String(error)
     });
+    try {
+      const text = await response.clone().text();
+      return text.length > 0 ? text : undefined;
+    } catch {
+      // ignore secondary failure
+    }
     return undefined;
   }
 }
 
-interface StartSessionOptions {
+async function createResponse({
+  env,
+  model,
+  input,
+  instructions,
+  tools,
+  background,
+  maxOutputTokens,
+  responseFormat,
+  metadata,
+  reasoning
+}: CreateResponseOptions): Promise<OpenAIResponsesPayload> {
+  const url = `${getBaseUrl(env)}/responses`;
+  const headers = createHeaders(env);
+  const body: Record<string, unknown> = {
+    model,
+    input
+  };
+
+  if (instructions) {
+    body.instructions = instructions;
+  }
+  if (Array.isArray(tools) && tools.length > 0) {
+    body.tools = tools;
+  }
+  if (typeof background === "boolean") {
+    body.background = background;
+  }
+  if (typeof maxOutputTokens === "number") {
+    body.max_output_tokens = maxOutputTokens;
+  }
+  if (responseFormat) {
+    const { type, ...rest } = responseFormat;
+    body.text = {
+      ...(body.text as Record<string, unknown> | undefined),
+      format: {
+        type,
+        ...rest
+      }
+    };
+  }
+  if (metadata) {
+    body.metadata = metadata;
+  }
+  if (reasoning) {
+    body.reasoning = reasoning;
+  }
+
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body)
+    },
+    { provider: "openai-deep-research", operation: "createResponse" }
+  );
+
+  const payload = await safeJson(response);
+  return (payload ?? {}) as OpenAIResponsesPayload;
+}
+
+async function retrieveResponse(env: ServerEnv, responseId: string): Promise<OpenAIResponsesPayload> {
+  const url = `${getBaseUrl(env)}/responses/${encodeURIComponent(responseId)}`;
+  const headers = createHeaders(env);
+
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "GET",
+      headers
+    },
+    { provider: "openai-deep-research", operation: "retrieveResponse" }
+  );
+
+  const payload = await safeJson(response);
+  return (payload ?? {}) as OpenAIResponsesPayload;
+}
+
+function extractOutputText(payload: OpenAIResponsesPayload): string | null {
+  const items = Array.isArray(payload.output) ? payload.output : [];
+  const textFragments: string[] = [];
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    if (item.type === "message") {
+      const content = Array.isArray(item.content) ? item.content : [];
+      for (const fragment of content) {
+        if (fragment?.type === "output_text" && typeof fragment.text === "string") {
+          textFragments.push(fragment.text);
+        }
+      }
+    }
+  }
+
+  if (textFragments.length === 0) {
+    return null;
+  }
+
+  return textFragments.join("\n").trim();
+}
+
+function parseJsonFromResponse<T>(payload: OpenAIResponsesPayload): T | null {
+  const text = extractOutputText(payload);
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch (error) {
+    logger.warn("openai.deepResearch.json_parse_failed", {
+      error: error instanceof Error ? error.message : String(error),
+      text
+    });
+    return null;
+  }
+}
+
+function clampQuestionCount(questions: Array<{ question: string }>): Array<{ index: number; text: string }> {
+  const sanitized: Array<{ index: number; text: string }> = [];
+
+  for (let idx = 0; idx < questions.length && sanitized.length < MAX_CLARIFICATION_QUESTIONS; idx += 1) {
+    const question = questions[idx]?.question?.trim();
+    if (question) {
+      sanitized.push({
+        index: sanitized.length + 1,
+        text: question
+      });
+    }
+  }
+
+  return sanitized;
+}
+
+function findNextUnansweredQuestion(
+  questions: Array<{ index: number; text: string }>,
+  answers: Array<{ index: number; answer: string }>
+): { index: number; text: string } | null {
+  if (questions.length === 0) {
+    return null;
+  }
+
+  const answeredIndexes = new Set(
+    answers
+      .filter((entry) => typeof entry.index === "number")
+      .map((entry) => entry.index)
+  );
+
+  const ordered = [...questions].sort((a, b) => a.index - b.index);
+  for (const question of ordered) {
+    if (!answeredIndexes.has(question.index)) {
+      return question;
+    }
+  }
+
+  return null;
+}
+
+function buildDeepResearchPayload(
+  response: OpenAIResponsesPayload,
+  finalOutputText: string | null
+): OpenAIDeepResearchRunPayload {
+  const summary = finalOutputText?.split(/\n{2,}/)[0]?.trim() ?? "";
+  const remaining = finalOutputText
+    ? finalOutputText
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+    : [];
+  const insights = remaining.length > 1 ? remaining.slice(1) : [];
+
+  return {
+    id: response.id,
+    status: response.status,
+    output: {
+      summary,
+      insights: insights.length
+        ? [
+            {
+              title: insights[0],
+              bullets: insights.slice(1)
+            }
+          ]
+        : [],
+      sources: extractSources(response)
+    },
+    usage: {
+      total_tokens: response.usage?.total_tokens,
+      model: response.model
+    },
+    meta: {
+      rawText: finalOutputText,
+      output: response.output
+    }
+  };
+}
+
+function extractSources(payload: OpenAIResponsesPayload): Array<{ title?: string; url?: string }> | undefined {
+  const items = Array.isArray(payload.output) ? payload.output : [];
+  const sources: Array<{ title?: string; url?: string }> = [];
+
+  for (const item of items) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    if (item.type === "web_search_call") {
+      const results = (item as { results?: Array<Record<string, unknown>> }).results;
+      if (Array.isArray(results)) {
+        for (const result of results) {
+          const title = typeof result?.title === "string" ? result.title.trim() : undefined;
+          const url = typeof result?.url === "string" ? result.url : undefined;
+          if (title || url) {
+            sources.push({ title, url });
+          }
+        }
+      }
+    }
+  }
+
+  return sources.length > 0 ? sources : undefined;
+}
+
+export interface StartSessionOptions {
   topic: string;
   context?: string;
 }
@@ -158,52 +417,81 @@ export interface StartSessionResult {
 
 export async function startSession({ topic, context }: StartSessionOptions): Promise<StartSessionResult> {
   const env = getServerEnv();
-  const url = `${env.OPENAI_DR_BASE_URL.replace(/\/$/, "")}/deep-research/sessions`;
-  const headers: HeadersInit = {
-    Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    "Content-Type": "application/json"
-  };
+  const clarifierModel = env.OPENAI_CLARIFIER_MODEL ?? DEFAULT_CLARIFIER_MODEL;
 
   logger.info("openai.deepResearch.startSession", {
     provider: "openai-deep-research",
-    topicLength: topic.length
+    topicLength: topic.length,
+    clarifierModel
   });
 
-  const response = await fetchWithRetry(
-    url,
-    {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ topic, context })
-    },
-    { provider: "openai-deep-research", operation: "startSession" }
-  );
+  const clarifierInstructions = [
+    "You are helping a researcher gather clarification before a deep research task.",
+    `Ask up to ${MAX_CLARIFICATION_QUESTIONS} concise follow-up questions only when they are necessary.`,
+    "If the topic is already sufficiently detailed, you may return an empty list.",
+    "Return a JSON object that matches the provided schema."
+  ].join(" ");
 
-  const payload = await safeJson(response);
-  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
-
-  const questionsRaw = Array.isArray(data.questions) ? data.questions : [];
-  const questions = questionsRaw
-    .map((question, index) => normalizeQuestionPayload(question, index + 1))
-    .filter((item): item is { index: number; text: string } => item !== null);
-
-  const sessionIdValue = data.id;
-  const result: StartSessionResult = {
-    sessionId: typeof sessionIdValue === "string" ? sessionIdValue : "",
-    questions,
-    raw: payload
+  const fallbackClarifier: ClarifierSchema = {
+    questions: []
   };
 
-  if (!result.sessionId) {
-    throw new Error("OpenAI Deep Research session response did not include an id");
-  }
+  const clarifierResponse = await createResponse({
+    env,
+    model: clarifierModel,
+    input: [
+      `Research topic: ${topic.trim()}`,
+      context ? `Additional context: ${context.trim()}` : null
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    instructions: clarifierInstructions,
+    responseFormat: {
+      type: "json_schema",
+      name: "clarification_questions",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["questions"],
+        properties: {
+          questions: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["question"],
+              properties: {
+                question: {
+                  type: "string",
+                  description: "A concise clarifying question."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    maxOutputTokens: 400
+  });
 
-  return result;
+  const parsed = parseJsonFromResponse<ClarifierSchema>(clarifierResponse) ?? fallbackClarifier;
+  const questions = clampQuestionCount(parsed.questions ?? []);
+  const sessionId = randomUUID();
+
+  return {
+    sessionId,
+    questions,
+    raw: clarifierResponse
+  };
 }
 
 interface SubmitAnswerOptions {
   sessionId: string;
   answer: string;
+  topic: string;
+  questions: Array<{ index: number; text: string }>;
+  answers: Array<{ index: number; answer: string }>;
+  context?: string;
 }
 
 export interface SubmitAnswerResult {
@@ -212,51 +500,84 @@ export interface SubmitAnswerResult {
   raw: unknown;
 }
 
-export async function submitAnswer({ sessionId, answer }: SubmitAnswerOptions): Promise<SubmitAnswerResult> {
-  if (!sessionId) {
-    throw new Error("sessionId is required to submit an answer");
-  }
-
+export async function submitAnswer({
+  sessionId,
+  answer,
+  topic,
+  questions,
+  answers,
+  context
+}: SubmitAnswerOptions): Promise<SubmitAnswerResult> {
   const env = getServerEnv();
-  const base = env.OPENAI_DR_BASE_URL.replace(/\/$/, "");
-  const url = `${base}/deep-research/sessions/${encodeURIComponent(sessionId)}/responses`;
+  const pendingQuestion = findNextUnansweredQuestion(questions, answers);
 
   logger.info("openai.deepResearch.submitAnswer", {
     provider: "openai-deep-research",
     sessionId,
-    answerLength: answer.length
+    answerLength: answer.length,
+    remainingQuestions: pendingQuestion ? 1 : 0
   });
 
-  const response = await fetchWithRetry(
-    url,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ answer })
+  if (pendingQuestion) {
+    return {
+      nextQuestion: pendingQuestion,
+      raw: { sessionId, pendingQuestion }
+    };
+  }
+
+  const promptWriterModel = env.OPENAI_PROMPT_WRITER_MODEL ?? DEFAULT_PROMPT_WRITER_MODEL;
+
+  const instructions = [
+    "You rewrite user-provided research tasks into a fully-specified prompt for a deep research model.",
+    "Use all answers that the user supplied to craft a single, detailed prompt in the user's voice.",
+    "Explicitly mention any constraints, goals, and desired outputs.",
+    "Return JSON that matches the provided schema."
+  ].join(" ");
+
+  const formattedAnswers = answers
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => `Q${entry.index}: ${questions.find((q) => q.index === entry.index)?.text ?? ""}\nA${entry.index}: ${entry.answer}`)
+    .join("\n\n");
+
+  const promptWriterResponse = await createResponse({
+    env,
+    model: promptWriterModel,
+    input: [
+      `Research topic: ${topic.trim()}`,
+      context ? `Additional context: ${context.trim()}` : null,
+      formattedAnswers ? `Clarifications:\n${formattedAnswers}` : null
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    instructions,
+    responseFormat: {
+      type: "json_schema",
+      name: "deep_research_prompt",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["final_prompt"],
+        properties: {
+          final_prompt: {
+            type: "string",
+            description: "A detailed prompt ready for the deep research model."
+          }
+        }
+      }
     },
-    { provider: "openai-deep-research", operation: "submitAnswer" }
-  );
+    maxOutputTokens: 600
+  });
 
-  const payload = await safeJson(response);
-  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
+  const parsed = parseJsonFromResponse<PromptWriterSchema>(promptWriterResponse);
+  const finalPrompt = parsed?.final_prompt?.trim();
 
-  const nextQuestionPayload = data.next_question ?? data.nextQuestion;
-  const questionsAnswered = toNumber(data.questions_answered);
-  const fallbackIndex = questionsAnswered ? questionsAnswered + 1 : 1;
-
-  const normalizedNext = normalizeQuestionPayload(nextQuestionPayload, fallbackIndex);
-  const nextQuestion = normalizedNext ?? undefined;
-
-  const finalPromptValue = data.final_prompt ?? data.finalPrompt;
-  const finalPrompt = toTrimmedString(finalPromptValue);
+  if (!finalPrompt) {
+    throw new Error("Failed to generate final prompt from clarification answers");
+  }
 
   return {
-    nextQuestion,
     finalPrompt,
-    raw: payload
+    raw: promptWriterResponse
   };
 }
 
@@ -272,48 +593,39 @@ export interface ExecuteRunResult {
 }
 
 export async function executeRun({ sessionId, prompt }: ExecuteRunOptions): Promise<ExecuteRunResult> {
-  if (!sessionId) {
-    throw new Error("sessionId is required to execute a run");
-  }
-
   const env = getServerEnv();
-  const base = env.OPENAI_DR_BASE_URL.replace(/\/$/, "");
-  const url = `${base}/deep-research/sessions/${encodeURIComponent(sessionId)}/runs`;
+  const model = env.OPENAI_DR_MODEL ?? DEFAULT_DEEP_RESEARCH_MODEL;
 
   logger.info("openai.deepResearch.executeRun", {
     provider: "openai-deep-research",
     sessionId,
-    promptLength: prompt.length
+    promptLength: prompt.length,
+    model
   });
 
-  const response = await fetchWithRetry(
-    url,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ prompt })
-    },
-    { provider: "openai-deep-research", operation: "executeRun" }
-  );
+  const response = await createResponse({
+    env,
+    model,
+    input: prompt,
+    tools: [
+      {
+        type: "web_search_preview"
+      }
+    ],
+    background: true
+  });
 
-  const payload = await safeJson(response);
-  const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
-
-  const runIdCandidate = data.id ?? data.run_id;
-  const runId = typeof runIdCandidate === "string" ? runIdCandidate : "";
-  const status = toTrimmedString(data.status) ?? "queued";
-
+  const runId = response.id;
   if (!runId) {
-    throw new Error("OpenAI Deep Research run response did not include an id");
+    throw new Error("OpenAI Deep Research response did not include an id");
   }
+
+  const status = typeof response.status === "string" ? response.status : "in_progress";
 
   return {
     runId,
     status,
-    raw: payload
+    raw: response
   };
 }
 
@@ -334,14 +646,7 @@ export async function pollResult({
   maxAttempts = 10,
   initialDelayMs = 1000
 }: PollResultOptions): Promise<PollResultResponse> {
-  if (!runId) {
-    throw new Error("runId is required to poll for a result");
-  }
-
   const env = getServerEnv();
-  const base = env.OPENAI_DR_BASE_URL.replace(/\/$/, "");
-  const url = `${base}/deep-research/runs/${encodeURIComponent(runId)}`;
-
   let attempt = 0;
   let delay = initialDelayMs;
 
@@ -352,42 +657,23 @@ export async function pollResult({
       attempt: attempt + 1
     });
 
-    const response = await fetchWithRetry(
-      url,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${env.OPENAI_API_KEY}`
-        }
-      },
-      {
-        provider: "openai-deep-research",
-        operation: "pollResult",
-        maxAttempts: DEFAULT_MAX_ATTEMPTS,
-        initialDelayMs: DEFAULT_INITIAL_DELAY_MS
-      }
-    );
-
-    const payload = await safeJson(response);
-    const data = isRecord(payload) ? (payload as Record<string, unknown>) : {};
-    const status = toTrimmedString(data.status) ?? "unknown";
+    const response = await retrieveResponse(env, runId);
+    const status = typeof response.status === "string" ? response.status : "unknown";
 
     if (status === "completed") {
-      const normalized = normalizeOpenAIDeepResearchResult(
-        data as OpenAIDeepResearchRunPayload
-      );
+      const outputText = extractOutputText(response);
+      const payload = buildDeepResearchPayload(response, outputText);
+      const normalized = normalizeOpenAIDeepResearchResult(payload);
+
       return {
         status,
         result: normalized,
-        raw: payload
+        raw: response
       };
     }
 
-    if (status === "failed") {
-      const errorPayload = data.error;
-      const errorMessage = isRecord(errorPayload)
-        ? toTrimmedString(errorPayload.message)
-        : toTrimmedString(errorPayload);
+    if (status === "failed" || status === "cancelled") {
+      const errorMessage = outputErrorMessage(response);
       throw new Error(errorMessage ?? "OpenAI Deep Research run reported failure");
     }
 
@@ -400,7 +686,24 @@ export async function pollResult({
     delay *= 2;
   }
 
-  throw new Error(
-    `OpenAI Deep Research result not ready after ${maxAttempts} attempts`
-  );
+  throw new Error("Timed out waiting for OpenAI Deep Research result");
+}
+
+function outputErrorMessage(response: OpenAIResponsesPayload): string | undefined {
+  const errorObj = typeof response.error === "object" && response.error !== null ? (response.error as Record<string, unknown>) : null;
+  if (errorObj) {
+    const message = typeof errorObj.message === "string" ? errorObj.message : undefined;
+    const code = typeof errorObj.code === "string" ? errorObj.code : undefined;
+    if (message) {
+      return code ? `${message} (code: ${code})` : message;
+    }
+  }
+  const text = extractOutputText(response);
+  if (text) {
+    return text;
+  }
+  if (typeof response.status === "string") {
+    return `Deep research job ended with status ${response.status}`;
+  }
+  return undefined;
 }

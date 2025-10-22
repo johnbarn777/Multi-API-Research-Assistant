@@ -118,6 +118,11 @@ export async function submitRefinementAnswer({
     demoMode
   });
 
+  const updatedAnswers = upsertAnswer(research.dr.answers, {
+    index: questionIndex,
+    answer: sanitizedAnswer
+  });
+
   const providerResponse = demoMode
     ? getDemoRefinementResponse({
         topic: research.title,
@@ -127,7 +132,10 @@ export async function submitRefinementAnswer({
       })
     : await submitOpenAiAnswer({
         sessionId,
-        answer: sanitizedAnswer
+        answer: sanitizedAnswer,
+        topic: research.title,
+        questions: research.dr.questions ?? [],
+        answers: updatedAnswers
       });
 
   const nextQuestion = providerResponse.nextQuestion ?? null;
@@ -143,11 +151,6 @@ export async function submitRefinementAnswer({
     demoMode
   });
 
-  const nextAnswers = upsertAnswer(research.dr.answers, {
-    index: questionIndex,
-    answer: sanitizedAnswer
-  });
-
   const nextQuestions =
     nextQuestion !== null
       ? upsertQuestion(research.dr.questions, nextQuestion)
@@ -160,7 +163,7 @@ export async function submitRefinementAnswer({
     {
       status,
       dr: {
-        answers: nextAnswers,
+        answers: updatedAnswers,
         questions: nextQuestions,
         ...(finalPrompt ? { finalPrompt } : {})
       }
@@ -173,7 +176,7 @@ export async function submitRefinementAnswer({
     ownerUid,
     requestId,
     nextStatus: status ?? research.status,
-    recordedAnswers: nextAnswers.length,
+    recordedAnswers: updatedAnswers.length,
     hasFinalPrompt: Boolean(finalPrompt)
   });
 

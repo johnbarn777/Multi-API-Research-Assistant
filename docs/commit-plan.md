@@ -61,9 +61,14 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Introduce `src/lib/providers/normalizers.ts` to map raw payloads into `ProviderResult` shape.~~
 - ~~Wire configuration to use base URLs/models from env helpers.~~
 - ~~Ensure logging instrumentation via existing logger utility.~~
+- 2025-10-18: Deep Research client now uses the Responses API, adds the required tooling configuration, and, when
+  `OPENAI_PROJECT_ID` is provided, forwards the `OpenAI-Project` header so project-scoped keys work without code changes.
+- 2025-10-19: Disabled `reasoning.summary` by default because OpenAI only allows reasoning summaries for verified
+  organizations; the integration now succeeds without additional account setup.
 
 **Testing**
 - ~~Unit: Vitest tests with MSW/nock to assert request payloads, retry logic, and normalization output for representative provider responses.~~
+- 2025-10-18: Added coverage ensuring project-scoped configuration emits the expected headers.
 - Integration: None (will be covered when APIs invoke providers).
 - E2E: Not applicable.
 
@@ -178,6 +183,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Integration: CI workflow ensures `pnpm lint`, `pnpm test`, `pnpm test:integration` pass locally.~~ (`.github/workflows/ci.yml`)
 - ~~E2E: Playwright mobile viewport test confirming no horizontal scroll; accessibility scan passes.~~ (`tests/e2e/research.spec.ts`)
 > Status (2025-10-15): `pnpm lint` now passes after normalizing type-only imports, tightening provider/email typings, and wiring the Firebase sign-in flow, unblocking the CI lint gate.
+> Status (2025-10-18): When `DEMO_MODE=false`, local executions of `pnpm lint`, `pnpm type-check`, `pnpm test:unit`, and `pnpm test:integration` succeed. `pnpm test:e2e` currently crashes the dev server before tests run (`Invalid hook call` raised from `next/dist/client/link.js` while Playwright loads `/dashboard`), so the E2E suite remains red pending investigation.
 
 ## Commit 13: Demo mode fixtures & delivery bypass
 

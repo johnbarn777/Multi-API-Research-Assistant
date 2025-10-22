@@ -322,6 +322,10 @@ NEXT_PUBLIC_FIREBASE_APP_ID=
 # OpenAI Deep Research
 OPENAI_API_KEY=
 OPENAI_DR_BASE_URL=https://api.openai.com/v1
+OPENAI_PROJECT_ID= # optional; required for project-scoped keys (e.g., Deep Research preview)
+OPENAI_DR_MODEL=o4-mini-deep-research # optional override for primary Deep Research model
+OPENAI_CLARIFIER_MODEL=gpt-4.1-mini # optional override for clarification question model
+OPENAI_PROMPT_WRITER_MODEL=gpt-4.1-mini # optional override for prompt rewriting model
 
 # Google Gemini
 GEMINI_API_KEY=
@@ -605,6 +609,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * 2025-10-16: Commit 10 dashboard polish verified with `pnpm test:unit` and `pnpm test:integration`. Playwright dashboard scenario uses a non-production `__dashboard_fixture` cookie to feed fixture data into the server-rendered list.
 * 2025-10-17: Commit 11 reliability work verified via `pnpm test:unit` (new `tests/unit/utils/retry.test.ts`) and `pnpm test:integration` (`tests/integration/provider-retry.test.ts`, updated finalize email scenarios).
 * 2025-10-17: Commit 12 accessibility & CI updates validated with `pnpm test:e2e` (axe-core scan + mobile viewport) and the new GitHub Actions workflow.
+* 2025-10-18: With `DEMO_MODE=false` (live providers), `pnpm lint`, `pnpm type-check`, `pnpm test:unit`, and `pnpm test:integration` pass locally. `pnpm test:e2e` currently fails because the dev server crashes before the first assertion (`Invalid hook call` surfaced from `next/dist/client/link.js` when Playwright visits `/dashboard`); follow-up required.
 
 ---
 
@@ -641,6 +646,8 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 ## 14) Implementation Notes (MVP)
 
 * **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction (`src/lib/providers/openaiDeepResearch.ts`) covering `startSession()`, `submitAnswer()`, `executeRun()`, `pollResult()` with retry/backoff.
+* **OpenAI DR project keys**: when `OPENAI_PROJECT_ID` is provided, requests include the `OpenAI-Project` header so project-scoped keys work seamlessly with the Responses API. `OPENAI_DR_MODEL`, `OPENAI_CLARIFIER_MODEL`, and `OPENAI_PROMPT_WRITER_MODEL` can override the default model choices if the project has custom access tiers.
+* **Reasoning summaries**: generating reasoning summaries requires a verified organization. The integration leaves `reasoning.summary` unset so requests succeed even when verification is pending. Enable it only after the org is verified.
 * **Gemini**: `generateContent` (`src/lib/providers/gemini.ts`) accepts the refined prompt, retries transient failures, and polls pending operations when necessary.
 * **Provider normalization**: Map provider responses into `ProviderResult` via `src/lib/providers/normalizers.ts` so downstream consumers have a consistent shape.
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.

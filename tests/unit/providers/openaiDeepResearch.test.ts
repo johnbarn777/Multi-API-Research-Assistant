@@ -39,7 +39,14 @@ const REQUIRED_ENV: Record<string, string> = {
   NEXT_PUBLIC_FIREBASE_APP_ID: "1:123:web:abc"
 };
 
-const OPTIONAL_ENV_KEYS = ["SENDGRID_API_KEY", "FIREBASE_STORAGE_BUCKET"] as const;
+const OPTIONAL_ENV_KEYS = [
+  "SENDGRID_API_KEY",
+  "FIREBASE_STORAGE_BUCKET",
+  "OPENAI_PROJECT_ID",
+  "OPENAI_DR_MODEL",
+  "OPENAI_CLARIFIER_MODEL",
+  "OPENAI_PROMPT_WRITER_MODEL"
+] as const;
 
 const ORIGINAL_ENV: Partial<Record<string, string | undefined>> = {};
 
@@ -81,6 +88,29 @@ function restoreEnv() {
   }
 }
 
+function buildResponsePayload(id: string, status: string, outputText: string) {
+  return {
+    id,
+    status,
+    output: [
+      {
+        id: "msg_1",
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "output_text",
+            text: outputText
+          }
+        ]
+      }
+    ],
+    usage: {
+      total_tokens: 123
+    }
+  };
+}
+
 describe("openaiDeepResearch provider", () => {
   beforeEach(() => {
     applyEnv();
@@ -91,152 +121,167 @@ describe("openaiDeepResearch provider", () => {
     restoreEnv();
   });
 
-  it("creates a session and returns normalized questions", async () => {
+  it("creates a session and returns clarifying questions", async () => {
     const env = getServerEnv();
-    const url = `${env.OPENAI_DR_BASE_URL}/deep-research/sessions`;
+    const url = `${env.OPENAI_DR_BASE_URL}/responses`;
     let receivedBody: any;
 
     server.use(
       http.post(url, async ({ request }) => {
         receivedBody = await request.json();
-        return HttpResponse.json({
-          id: "session_123",
-          questions: [
-            { index: 2, text: "What scope should we narrow down to?" },
-            { text: "Provide key stakeholders" }
-          ]
-        });
+        return HttpResponse.json(
+          buildResponsePayload(
+            "resp_clarify",
+            "completed",
+            JSON.stringify({
+              questions: [
+                { question: "What is the target timeframe?" },
+                { question: "Are there preferred geographies?" }
+              ]
+            })
+          )
+        );
       })
     );
 
-    const session = await startSession({ topic: "AI safety" });
+    const session = await startSession({ topic: "AI safety regulation trends" });
 
-    expect(receivedBody).toEqual({ topic: "AI safety", context: undefined });
-    expect(session.sessionId).toBe("session_123");
+    expect(receivedBody.model).toBe("gpt-4.1-mini");
+    expect(receivedBody.text?.format?.type).toBe("json_schema");
+    expect(receivedBody.text?.format?.name).toBe("deep_research_prompt");
+    expect(receivedBody.text?.format?.name).toBe("clarification_questions");
+    expect(receivedBody.background).toBeUndefined();
+    expect(receivedBody.text?.format?.type).toBe("json_schema");
+    expect(session.sessionId).toMatch(/^.{8}-/); // uuid format
     expect(session.questions).toEqual([
-      { index: 2, text: "What scope should we narrow down to?" },
-      { index: 2, text: "Provide key stakeholders" }
+      { index: 1, text: "What is the target timeframe?" },
+      { index: 2, text: "Are there preferred geographies?" }
     ]);
     expect(session.raw).toBeDefined();
   });
 
-  it("retries transient failures when starting a session", async () => {
-    vi.useFakeTimers();
-    const env = getServerEnv();
-    const url = `${env.OPENAI_DR_BASE_URL}/deep-research/sessions`;
-    let callCount = 0;
+  it("returns the next unanswered question without calling OpenAI", async () => {
+    const result = await submitAnswer({
+      sessionId: "session_1",
+      answer: "Any timeframe works.",
+      topic: "AI safety",
+      questions: [
+        { index: 1, text: "What timeframe are you considering?" },
+        { index: 2, text: "Which regions matter most?" }
+      ],
+      answers: [{ index: 1, answer: "Any timeframe works." }]
+    });
 
-    server.use(
-      http.post(url, () => {
-        callCount += 1;
-        if (callCount === 1) {
-          return HttpResponse.json({ error: "transient" }, { status: 503 });
-        }
-
-        return HttpResponse.json({
-          id: "session_456",
-          questions: []
-        });
-      })
-    );
-
-    const promise = startSession({ topic: "climate" });
-    await vi.runAllTimersAsync();
-    const result = await promise;
-
-    expect(result.sessionId).toBe("session_456");
-    expect(callCount).toBe(2);
+    expect(result.nextQuestion).toEqual({
+      index: 2,
+      text: "Which regions matter most?"
+    });
+    expect(result.finalPrompt).toBeUndefined();
   });
 
-  it("submits answers and surfaces next question and final prompt", async () => {
+  it("generates a final prompt when all questions are answered", async () => {
     const env = getServerEnv();
-    const url = `${env.OPENAI_DR_BASE_URL}/deep-research/sessions/session_123/responses`;
+    const url = `${env.OPENAI_DR_BASE_URL}/responses`;
+    let receivedBody: any;
 
     server.use(
       http.post(url, async ({ request }) => {
-        const body = await request.json();
-        expect(body).toEqual({ answer: "We should focus on policy impacts." });
-        return HttpResponse.json({
-          next_question: { index: 3, text: "List critical policy levers." },
-          final_prompt: "Investigate policy levers for AI safety."
-        });
+        receivedBody = await request.json();
+        return HttpResponse.json(
+          buildResponsePayload(
+            "resp_prompt",
+            "completed",
+            JSON.stringify({
+              final_prompt: "Investigate AI safety in 2024 across the EU and US."
+            })
+          )
+        );
       })
     );
 
     const response = await submitAnswer({
-      sessionId: "session_123",
-      answer: "We should focus on policy impacts."
+      sessionId: "session_1",
+      answer: "Focus on 2024 in the EU and US.",
+      topic: "AI safety",
+      questions: [
+        { index: 1, text: "What timeframe are you considering?" },
+        { index: 2, text: "Which regions matter most?" }
+      ],
+      answers: [
+        { index: 1, answer: "Focus on 2024." },
+        { index: 2, answer: "EU and US." }
+      ]
     });
 
-    expect(response.nextQuestion).toEqual({ index: 3, text: "List critical policy levers." });
-    expect(response.finalPrompt).toBe("Investigate policy levers for AI safety.");
-    expect(response.raw).toBeDefined();
+    expect(receivedBody.model).toBe("gpt-4.1-mini");
+    expect(response.nextQuestion).toBeUndefined();
+    expect(response.finalPrompt).toBe("Investigate AI safety in 2024 across the EU and US.");
   });
 
-  it("executes a run and polls until the normalized result is returned", async () => {
-    vi.useFakeTimers();
+  it("executes a deep research run using the configured project header", async () => {
+    applyEnv({
+      OPENAI_PROJECT_ID: "proj_test",
+      OPENAI_DR_MODEL: "o3-deep-research"
+    });
     const env = getServerEnv();
-    const runUrl = `${env.OPENAI_DR_BASE_URL}/deep-research/sessions/session_123/runs`;
-    const pollUrl = `${env.OPENAI_DR_BASE_URL}/deep-research/runs/run_123`;
-    let runRequestBody: any;
-    let pollCount = 0;
+    const url = `${env.OPENAI_DR_BASE_URL}/responses`;
+    let receivedHeaders: Headers | undefined;
+    let receivedBody: any;
 
     server.use(
-      http.post(runUrl, async ({ request }) => {
-        runRequestBody = await request.json();
-        return HttpResponse.json({ id: "run_123", status: "queued" });
-      }),
-      http.get(pollUrl, () => {
-        pollCount += 1;
-        if (pollCount < 2) {
-          return HttpResponse.json({ status: "running" });
-        }
-
+      http.post(url, async ({ request }) => {
+        receivedHeaders = request.headers;
+        receivedBody = await request.json();
         return HttpResponse.json({
-          status: "completed",
-          output: {
-            summary: "Summary of findings",
-            insights: [
-              {
-                title: "Key takeaway",
-                bullets: ["Insight A", "Insight B"]
-              }
-            ],
-            sources: [
-              {
-                title: "Example Source",
-                url: "https://example.com"
-              }
-            ]
-          },
-          usage: {
-            total_tokens: 1234,
-            model: "gpt-deep-research-1",
-            started_at: "2024-01-01T00:00:00Z",
-            completed_at: "2024-01-01T00:05:00Z"
-          }
+          id: "resp_run",
+          status: "in_progress"
         });
       })
     );
 
-    const run = await executeRun({ sessionId: "session_123", prompt: "Do research" });
-    const pollPromise = pollResult({ runId: run.runId, initialDelayMs: 10, maxAttempts: 5 });
-    await vi.advanceTimersByTimeAsync(10);
-    await vi.advanceTimersByTimeAsync(20);
-    const pollResultResponse = await pollPromise;
-
-    expect(runRequestBody).toEqual({ prompt: "Do research" });
-    expect(pollCount).toBe(2);
-    expect(pollResultResponse.status).toBe("completed");
-    expect(pollResultResponse.result).toMatchObject({
-      summary: "Summary of findings",
-      insights: ["Key takeaway", "Insight A", "Insight B"],
-      meta: {
-        tokens: 1234,
-        model: "gpt-deep-research-1",
-        startedAt: "2024-01-01T00:00:00Z",
-        completedAt: "2024-01-01T00:05:00Z"
-      }
+    const result = await executeRun({
+      sessionId: "session_1",
+      prompt: "Research AI safety regulations."
     });
+
+    expect(receivedHeaders?.get("openai-project")).toBe("proj_test");
+    expect(receivedBody.model).toBe("o3-deep-research");
+    expect(receivedBody.background).toBe(true);
+    expect(receivedBody.tools).toEqual([{ type: "web_search_preview" }]);
+    expect(result.runId).toBe("resp_run");
+    expect(result.status).toBe("in_progress");
+  });
+
+  it("polls until completion and normalizes the response", async () => {
+    const env = getServerEnv();
+    const url = `${env.OPENAI_DR_BASE_URL}/responses/resp_done`;
+    let callCount = 0;
+
+    server.use(
+      http.get(url, () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return HttpResponse.json({
+            id: "resp_done",
+            status: "in_progress"
+          });
+        }
+
+        return HttpResponse.json(
+          buildResponsePayload(
+            "resp_done",
+            "completed",
+            "Summary line\n\nInsight A\nInsight B"
+          )
+        );
+      })
+    );
+
+    const response = await pollResult({ runId: "resp_done", initialDelayMs: 10, maxAttempts: 3 });
+
+    expect(callCount).toBe(2);
+    expect(response.status).toBe("completed");
+    expect(response.result?.summary).toBe("Summary line");
+    expect(response.result?.insights).toEqual(["Insight A", "Insight B"]);
   });
 });

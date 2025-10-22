@@ -5,8 +5,28 @@ import type { ListResearchResponse, ResearchListItem } from "../../src/types/api
 import type { ResearchStatus } from "../../src/types/research";
 import { SAMPLE_PDF_PAYLOAD } from "../../src/tests/fixtures/researchReport";
 
-const DEV_BYPASS_ENABLED =
-  process.env.DEV_AUTH_BYPASS === "true" || process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
+function parseBoolean(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
+const DEV_BYPASS_ENABLED = (() => {
+  const explicit =
+    parseBoolean(process.env.DEV_AUTH_BYPASS) ||
+    parseBoolean(process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS);
+
+  if (
+    process.env.DEV_AUTH_BYPASS === undefined &&
+    process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === undefined
+  ) {
+    return true;
+  }
+
+  return explicit;
+})();
 
 
 test.describe("Research flow", () => {
@@ -30,6 +50,15 @@ test.describe("Research flow", () => {
 
     await expect(page).toHaveURL(/\/sign-in\?redirectedFrom=%2Fdashboard$/);
     await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  });
+
+  test("redirects authenticated users away from the sign-in page", async ({ page }) => {
+    test.skip(!DEV_BYPASS_ENABLED, "Dev auth bypass must be enabled for this scenario.");
+
+    await page.goto("/sign-in?redirectedFrom=%2F");
+    await page.waitForURL("**/dashboard");
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   });
 
   test("dashboard displays research history with correct ordering", async ({ page }) => {

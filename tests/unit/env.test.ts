@@ -29,7 +29,15 @@ const REQUIRED_ENV: Record<string, string> = {
   NEXT_PUBLIC_FIREBASE_APP_ID: "1:123:web:abc"
 };
 
-const OPTIONAL_KEYS = ["SENDGRID_API_KEY", "FIREBASE_STORAGE_BUCKET", "DEMO_MODE"] as const;
+const OPTIONAL_KEYS = [
+  "SENDGRID_API_KEY",
+  "FIREBASE_STORAGE_BUCKET",
+  "DEMO_MODE",
+  "OPENAI_PROJECT_ID",
+  "OPENAI_DR_MODEL",
+  "OPENAI_CLARIFIER_MODEL",
+  "OPENAI_PROMPT_WRITER_MODEL"
+] as const;
 
 const ORIGINAL_ENV: Partial<Record<string, string | undefined>> = {};
 

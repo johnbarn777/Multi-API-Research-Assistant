@@ -568,7 +568,10 @@ describe("API /api/research", () => {
 
     expect(submitAnswer).toHaveBeenCalledWith({
       sessionId: "session-123",
-      answer: "First answer"
+      answer: "First answer",
+      topic: "Topic",
+      questions: [{ index: 1, text: "First question?" }],
+      answers: [{ index: 1, answer: "First answer" }]
     });
 
     expect(response.body.nextQuestion).toEqual({ index: 2, text: "Follow-up?" });
@@ -617,7 +620,10 @@ describe("API /api/research", () => {
 
     expect(submitAnswer).toHaveBeenCalledWith({
       sessionId: "session-abc",
-      answer: "Final clarification"
+      answer: "Final clarification",
+      topic: "Topic",
+      questions: [{ index: 1, text: "Primary question?" }],
+      answers: [{ index: 1, answer: "Final clarification" }]
     });
 
     expect(response.body.finalPrompt).toBe(

@@ -91,6 +91,8 @@ This repository scaffolds a Next.js 15 full-stack application that orchestrates 
 | `FIREBASE_CLIENT_EMAIL` | server | Service account email used by Firebase Admin SDK. |
 | `FIREBASE_PRIVATE_KEY` | server | Service account private key; multiline values with `\n` are normalized automatically. |
 | `OPENAI_API_KEY` / `OPENAI_DR_BASE_URL` | server | Credentials and base URL for OpenAI Deep Research. |
+| `OPENAI_PROJECT_ID` | server | Optional project id; required for project-scoped OpenAI keys so requests include the `OpenAI-Project` header. |
+| `OPENAI_DR_MODEL` / `OPENAI_CLARIFIER_MODEL` / `OPENAI_PROMPT_WRITER_MODEL` | server | Optional overrides when you have custom access to specific Deep Research or GPT-4.1 class models. |
 | `GEMINI_API_KEY` / `GEMINI_BASE_URL` / `GEMINI_MODEL` | server | Google Gemini configuration. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `GOOGLE_OAUTH_REDIRECT_URI` / `GOOGLE_OAUTH_SCOPES` | server | OAuth client used for Gmail API with `gmail.send` scope. |
 | `TOKEN_ENCRYPTION_KEY` | server | 32-byte base64 key for encrypting Gmail OAuth tokens (generate with `openssl rand -base64 32`). |
