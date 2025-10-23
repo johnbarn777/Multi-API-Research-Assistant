@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, afterEach, afterAll, describe, expect, it, vi } from "vitest";
-import { scheduleResearchRun } from "@/server/research/run";
+import { scheduleResearchRun, retryProviderRun } from "@/server/research/run";
 import {
   setResearchRepository,
   type CreateResearchInput,
@@ -344,12 +344,125 @@ describe("scheduleResearchRun", () => {
     const repository = new StubResearchRepository(research);
     setResearchRepository(repository);
 
+  await expect(
+    scheduleResearchRun({
+      researchId: "research-1",
+      ownerUid: "user-123",
+      userEmail: "user@example.com"
+    })
+  ).rejects.toMatchObject({ message: "Research does not have a final prompt to execute" });
+  });
+
+  it("retries a Gemini provider run independently", async () => {
+    const research = baseResearch();
+    research.status = "completed";
+    research.dr.status = "success";
+    research.dr.result = {
+      raw: {},
+      summary: "OpenAI summary",
+      insights: ["A"],
+      meta: { model: "gpt-test", tokens: 100 }
+    };
+    research.gemini.status = "failure";
+    research.gemini.error = "Initial failure";
+    const repository = new StubResearchRepository(research);
+    setResearchRepository(repository);
+
+    const geminiResult = {
+      raw: {},
+      summary: "New Gemini findings",
+      insights: ["Updated insight"],
+      meta: { model: "gemini-pro", tokens: 321 }
+    };
+
+    generateContent.mockResolvedValue(geminiResult);
+
+    const result = await retryProviderRun({
+      provider: "gemini",
+      researchId: "research-1",
+      ownerUid: "user-123",
+      userEmail: "user@example.com"
+    });
+
+    expect(result.alreadyRunning).toBe(false);
+    expect(result.research.status).toBe("running");
+    expect(result.research.gemini.status).toBe("running");
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const stored = repository.research;
+    expect(stored.status).toBe("completed");
+    expect(stored.gemini.status).toBe("success");
+    expect(stored.gemini.result).toEqual(geminiResult);
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries an OpenAI Deep Research run when session data is present", async () => {
+    const research = baseResearch();
+    research.status = "completed";
+    research.dr.status = "failure";
+    research.dr.error = "Initial OpenAI failure";
+    research.gemini.status = "success";
+    research.gemini.result = {
+      raw: {},
+      summary: "Gemini summary",
+      insights: [],
+      meta: { model: "gemini-pro", tokens: 200 }
+    };
+    const repository = new StubResearchRepository(research);
+    setResearchRepository(repository);
+
+    const openAiResult = {
+      raw: {},
+      summary: "Retried OpenAI summary",
+      insights: ["New data"],
+      meta: { model: "gpt-test", tokens: 555 }
+    };
+
+    executeRun.mockResolvedValue({ runId: "retry-openai", status: "queued", raw: {} });
+    pollResult.mockResolvedValue({ status: "completed", result: openAiResult, raw: {} });
+
+    const result = await retryProviderRun({
+      provider: "openai",
+      researchId: "research-1",
+      ownerUid: "user-123",
+      userEmail: "user@example.com"
+    });
+
+    expect(result.alreadyRunning).toBe(false);
+    expect(result.research.status).toBe("running");
+    expect(result.research.dr.status).toBe("running");
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const stored = repository.research;
+    expect(stored.status).toBe("completed");
+    expect(stored.dr.status).toBe("success");
+    expect(stored.dr.result).toEqual(openAiResult);
+    expect(mockFinalize.finalizeResearch).toHaveBeenCalledTimes(1);
+    expect(executeRun).toHaveBeenCalledWith({
+      sessionId: "session-abc",
+      prompt: "Refined research prompt"
+    });
+    expect(pollResult).toHaveBeenCalledWith({ runId: "retry-openai" });
+  });
+
+  it("throws when retrying an OpenAI run without a stored session id", async () => {
+    const research = baseResearch();
+    research.status = "completed";
+    research.dr.sessionId = undefined;
+    const repository = new StubResearchRepository(research);
+    setResearchRepository(repository);
+
     await expect(
-      scheduleResearchRun({
+      retryProviderRun({
+        provider: "openai",
         researchId: "research-1",
         ownerUid: "user-123",
         userEmail: "user@example.com"
       })
-    ).rejects.toMatchObject({ message: "Research does not have a final prompt to execute" });
+    ).rejects.toMatchObject({
+      message: "Research is missing the OpenAI Deep Research sessionId"
+    });
   });
 });

@@ -60,6 +60,12 @@ export default function ResearchDetailPage() {
   const [emailRetrySuccess, setEmailRetrySuccess] = useState<string | null>(null);
   const [isDownloadingReport, setIsDownloadingReport] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isRetryingOpenAi, setIsRetryingOpenAi] = useState(false);
+  const [openAiRetryError, setOpenAiRetryError] = useState<string | null>(null);
+  const [openAiRetrySuccess, setOpenAiRetrySuccess] = useState<string | null>(null);
+  const [isRetryingGemini, setIsRetryingGemini] = useState(false);
+  const [geminiRetryError, setGeminiRetryError] = useState<string | null>(null);
+  const [geminiRetrySuccess, setGeminiRetrySuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (!researchId) {
@@ -143,6 +149,24 @@ export default function ResearchDetailPage() {
     return () => clearTimeout(timer);
   }, [runSuccess]);
 
+  useEffect(() => {
+    if (!openAiRetrySuccess) {
+      return;
+    }
+
+    const timer = setTimeout(() => setOpenAiRetrySuccess(null), 2500);
+    return () => clearTimeout(timer);
+  }, [openAiRetrySuccess]);
+
+  useEffect(() => {
+    if (!geminiRetrySuccess) {
+      return;
+    }
+
+    const timer = setTimeout(() => setGeminiRetrySuccess(null), 2500);
+    return () => clearTimeout(timer);
+  }, [geminiRetrySuccess]);
+
   const currentQuestion = useMemo(
     () => (questions.length > 0 ? questions[currentIndex] ?? null : null),
     [questions, currentIndex]
@@ -179,6 +203,7 @@ export default function ResearchDetailPage() {
     }
   })();
   const runButtonDisabled = !canStartRun || isStartingRun;
+  const disableProviderRetry = research?.status === "running" || isStartingRun;
   const emailStatus = research?.report?.emailStatus ?? null;
   const emailedTo = research?.report?.emailedTo ?? null;
   const emailError = research?.report?.emailError ?? null;
@@ -342,6 +367,77 @@ export default function ResearchDetailPage() {
       setRunError(err instanceof Error ? err.message : "Failed to start provider execution");
     } finally {
       setIsStartingRun(false);
+    }
+  };
+
+  const handleRetryProvider = async (provider: "openai" | "gemini") => {
+    if (!researchId) {
+      return;
+    }
+
+    if (research?.status === "running") {
+      return;
+    }
+
+    const setLoading = provider === "openai" ? setIsRetryingOpenAi : setIsRetryingGemini;
+    const setError = provider === "openai" ? setOpenAiRetryError : setGeminiRetryError;
+    const setSuccess = provider === "openai" ? setOpenAiRetrySuccess : setGeminiRetrySuccess;
+    const providerLabel =
+      provider === "openai" ? "OpenAI Deep Research" : "Google Gemini";
+
+    if (!token) {
+      setError(`Authentication required to retry ${providerLabel}.`);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch(
+        `/api/research/${encodeURIComponent(researchId)}/providers/${provider}/retry`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      const body = (await response.json().catch(() => null)) as
+        | (RunResponse & { message?: string })
+        | { message?: string }
+        | null;
+
+      if (!response.ok || !body || typeof body !== "object" || !("item" in body)) {
+        const message =
+          body && typeof body === "object" && "message" in body && body.message
+            ? body.message
+            : `Failed to retry ${providerLabel}`;
+        throw new Error(message);
+      }
+
+      mutate(
+        {
+          item: body.item
+        },
+        false
+      );
+
+      setSuccess(
+        body.alreadyRunning
+          ? `${providerLabel} run already in progress.`
+          : `${providerLabel} retry started.`
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : `Failed to retry ${providerLabel}`
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -584,8 +680,24 @@ export default function ResearchDetailPage() {
       ) : null}
 
       <section className="grid gap-6 md:grid-cols-2">
-        <ProviderProgress provider="openai" state={research?.dr} />
-        <ProviderProgress provider="gemini" state={research?.gemini} />
+        <ProviderProgress
+          provider="openai"
+          state={research?.dr}
+          onRetry={() => handleRetryProvider("openai")}
+          isRetrying={isRetryingOpenAi}
+          retryError={openAiRetryError}
+          retrySuccess={openAiRetrySuccess}
+          disabled={disableProviderRetry}
+        />
+        <ProviderProgress
+          provider="gemini"
+          state={research?.gemini}
+          onRetry={() => handleRetryProvider("gemini")}
+          isRetrying={isRetryingGemini}
+          retryError={geminiRetryError}
+          retrySuccess={geminiRetrySuccess}
+          disabled={disableProviderRetry}
+        />
       </section>
 
       <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-6">

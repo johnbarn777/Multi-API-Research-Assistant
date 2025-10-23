@@ -14,7 +14,7 @@ import {
   ResearchNotFoundError,
   type ResearchRepository
 } from "@/server/repositories/researchRepository";
-import type { ProviderResult, Research, ResearchProviderState } from "@/types/research";
+import type { ProviderResult, Research, ResearchProviderState, ResearchStatus } from "@/types/research";
 import { finalizeResearch } from "@/server/research/finalize";
 import { getUserRepository } from "@/server/repositories/userRepository";
 
@@ -110,6 +110,87 @@ function resolveProviderPatch(outcome: ProviderOutcome): ResearchProviderState {
   };
 }
 
+async function settleResearchState({
+  repository,
+  researchId,
+  ownerUid,
+  fallbackEmail,
+  requestId
+}: {
+  repository: ResearchRepository;
+  researchId: string;
+  ownerUid: string;
+  fallbackEmail?: string | null;
+  requestId?: string;
+}): Promise<void> {
+  try {
+    const research = await repository.getById(researchId, { ownerUid });
+    if (!research) {
+      return;
+    }
+
+    const hasRunning =
+      research.dr?.status === "running" || research.gemini?.status === "running";
+    const successCount =
+      (research.dr?.status === "success" ? 1 : 0) +
+      (research.gemini?.status === "success" ? 1 : 0);
+
+    let nextStatus: ResearchStatus;
+    if (hasRunning) {
+      nextStatus = "running";
+    } else {
+      nextStatus = successCount > 0 ? "completed" : "failed";
+    }
+
+    if (research.status !== nextStatus) {
+      await repository.update(
+        researchId,
+        {
+          status: nextStatus
+        },
+        { ownerUid }
+      );
+    }
+
+    if (nextStatus === "completed") {
+      const userRepository = getUserRepository();
+
+      try {
+        const user = await userRepository.getById(ownerUid);
+        const normalizedSessionEmail =
+          typeof fallbackEmail === "string" && fallbackEmail.trim().length > 0
+            ? fallbackEmail.trim()
+            : null;
+        const normalizedProfileEmail =
+          user?.email && user.email.trim().length > 0 ? user.email.trim() : null;
+        const emailForFinalize = normalizedProfileEmail ?? normalizedSessionEmail ?? null;
+
+        await finalizeResearch({
+          researchId,
+          ownerUid,
+          userEmail: emailForFinalize,
+          fallbackEmail: normalizedSessionEmail,
+          requestId
+        });
+      } catch (error) {
+        logger.error("research.run.auto_finalize_failed", {
+          researchId,
+          ownerUid,
+          requestId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  } catch (error) {
+    logger.error("research.run.settle_failed", {
+      researchId,
+      ownerUid,
+      requestId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 async function runOpenAiProvider({
   researchId,
   sessionId,
@@ -165,7 +246,8 @@ async function runOpenAiProvider({
 
     const execution = await executeOpenAiRun({
       sessionId,
-      prompt
+      prompt,
+      requestId
     });
 
     jobId = execution.runId;
@@ -410,59 +492,13 @@ async function executeProviders({
     return;
   }
 
-  const hasSuccess =
-    (openAiOutcome?.status === "success" ? 1 : 0) +
-    (geminiOutcome?.status === "success" ? 1 : 0) >
-    0;
-
-  const finalStatus = hasSuccess ? "completed" : "failed";
-
-  try {
-    await repository.update(
-      researchId,
-      {
-        status: finalStatus
-      },
-      { ownerUid }
-    );
-  } catch (error) {
-    logger.error("research.run.final_status_failed", {
-      researchId,
-      requestId,
-      nextStatus: finalStatus,
-      error: error instanceof Error ? error.message : String(error)
-    });
-  }
-
-  if (finalStatus === "completed") {
-    const userRepository = getUserRepository();
-
-    try {
-      const user = await userRepository.getById(ownerUid);
-      const normalizedSessionEmail =
-        typeof fallbackEmail === "string" && fallbackEmail.trim().length > 0
-          ? fallbackEmail.trim()
-          : null;
-      const normalizedProfileEmail =
-        user?.email && user.email.trim().length > 0 ? user.email.trim() : null;
-      const emailForFinalize = normalizedProfileEmail ?? normalizedSessionEmail ?? null;
-
-      await finalizeResearch({
-        researchId,
-        ownerUid,
-        userEmail: emailForFinalize,
-        fallbackEmail: normalizedSessionEmail,
-        requestId
-      });
-    } catch (error) {
-      logger.error("research.run.auto_finalize_failed", {
-        researchId,
-        ownerUid,
-        requestId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
+  await settleResearchState({
+    repository,
+    researchId,
+    ownerUid,
+    fallbackEmail,
+    requestId
+  });
 }
 
 export async function scheduleResearchRun({
@@ -561,6 +597,189 @@ export async function scheduleResearchRun({
       error: error instanceof Error ? error.message : String(error)
     });
   });
+
+  return {
+    research: updated,
+    alreadyRunning: false
+  };
+}
+
+interface RetryProviderRunInput {
+  provider: ProviderKind;
+  researchId: string;
+  ownerUid: string;
+  userEmail?: string | null;
+  requestId?: string;
+}
+
+interface RetryProviderRunResult {
+  research: Research;
+  alreadyRunning: boolean;
+}
+
+export async function retryProviderRun({
+  provider,
+  researchId,
+  ownerUid,
+  userEmail,
+  requestId
+}: RetryProviderRunInput): Promise<RetryProviderRunResult> {
+  const sessionEmail = userEmail ? String(userEmail).trim() : null;
+  const repository = getResearchRepository();
+  const research = await repository.getById(researchId, { ownerUid });
+
+  if (!research) {
+    throw new ResearchNotFoundError(researchId);
+  }
+
+  if (research.status === RUNNING_STATUS) {
+    logger.info("research.retry.already_running", {
+      researchId,
+      provider,
+      requestId
+    });
+    return {
+      research,
+      alreadyRunning: true
+    };
+  }
+
+  const targetProvider = provider === "openai" ? research.dr : research.gemini;
+  if (targetProvider?.status === "running") {
+    logger.info("research.retry.provider_already_running", {
+      researchId,
+      provider,
+      requestId
+    });
+    return {
+      research,
+      alreadyRunning: true
+    };
+  }
+
+  const finalPrompt = sanitizePrompt(research.dr.finalPrompt);
+  if (!finalPrompt) {
+    throw Object.assign(new Error("Research does not have a final prompt to execute"), {
+      statusCode: 409
+    });
+  }
+
+  const sessionId = sanitizeSessionId(research.dr.sessionId);
+  if (provider === "openai" && !sessionId) {
+    throw Object.assign(new Error("Research is missing the OpenAI Deep Research sessionId"), {
+      statusCode: 409
+    });
+  }
+
+  const startedAt = new Date().toISOString();
+  const providerPatch: ResearchProviderState = {
+    status: "running",
+    startedAt,
+    completedAt: undefined,
+    durationMs: 0,
+    error: null,
+    result: undefined,
+    jobId: undefined
+  };
+
+  const updated = await repository.update(
+    researchId,
+    {
+      status: RUNNING_STATUS,
+      ...(provider === "openai" ? { dr: providerPatch } : {}),
+      ...(provider === "gemini" ? { gemini: providerPatch } : {})
+    },
+    { ownerUid }
+  );
+
+  logger.info("research.retry.provider_start", {
+    researchId,
+    provider,
+    ownerUid,
+    requestId
+  });
+
+  const answers = research.dr.answers ?? [];
+  void (async () => {
+    const startedTimestamp = Date.now();
+    try {
+      const outcome =
+        provider === "openai"
+          ? await runOpenAiProvider({
+              researchId,
+              sessionId: sessionId!,
+              prompt: finalPrompt,
+              requestId,
+              topic: research.title,
+              answers
+            })
+          : await runGeminiProvider({
+              researchId,
+              prompt: finalPrompt,
+              requestId,
+              topic: research.title,
+              answers
+            });
+
+      await repository.update(
+        researchId,
+        provider === "openai"
+          ? {
+              dr: resolveProviderPatch(outcome)
+            }
+          : {
+              gemini: resolveProviderPatch(outcome)
+            },
+        { ownerUid }
+      );
+
+      await settleResearchState({
+        repository,
+        researchId,
+        ownerUid,
+        fallbackEmail: sessionEmail,
+        requestId
+      });
+    } catch (error) {
+      logger.error("research.retry.provider_unhandled", {
+        researchId,
+        provider,
+        requestId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      const completedAt = new Date().toISOString();
+      const fallbackOutcome: ProviderOutcome = {
+        provider,
+        status: "failure",
+        error: error instanceof Error ? error.message : "Provider execution failed",
+        durationMs: Math.max(0, Date.now() - startedTimestamp),
+        startedAt,
+        completedAt,
+        jobId: undefined
+      };
+
+      await repository
+        .update(
+          researchId,
+          {
+            status: "failed",
+            ...(provider === "openai"
+              ? { dr: resolveProviderPatch(fallbackOutcome) }
+              : { gemini: resolveProviderPatch(fallbackOutcome) })
+          },
+          { ownerUid }
+        )
+        .catch((persistError) => {
+          logger.error("research.retry.status_update_failed", {
+            researchId,
+            provider,
+            requestId,
+            error: persistError instanceof Error ? persistError.message : String(persistError)
+          });
+        });
+    }
+  })();
 
   return {
     research: updated,

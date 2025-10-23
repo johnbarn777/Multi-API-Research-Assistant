@@ -15,7 +15,14 @@ import {
   startSession,
   submitAnswer
 } from "@/lib/providers/openaiDeepResearch";
+import * as retryUtils from "@/lib/utils/retry";
 import { server } from "@/tests/mocks/server";
+
+const mockDistributedLimiter = vi.hoisted(() => ({
+  acquireDistributedOpenAiSlot: vi.fn().mockResolvedValue(undefined)
+}));
+
+vi.mock("@/server/research/rateLimiter", () => mockDistributedLimiter);
 
 const REQUIRED_ENV: Record<string, string> = {
   FIREBASE_PROJECT_ID: "test-project",
@@ -45,7 +52,13 @@ const OPTIONAL_ENV_KEYS = [
   "OPENAI_PROJECT_ID",
   "OPENAI_DR_MODEL",
   "OPENAI_CLARIFIER_MODEL",
-  "OPENAI_PROMPT_WRITER_MODEL"
+  "OPENAI_PROMPT_WRITER_MODEL",
+  "OPENAI_DR_MAX_OUTPUT_TOKENS",
+  "OPENAI_DR_MAX_PROMPT_CHARS",
+  "OPENAI_DR_MAX_COMPLETION_TOKENS",
+  "OPENAI_DR_POLL_MAX_ATTEMPTS",
+  "OPENAI_DR_POLL_MAX_DELAY_MS",
+  "OPENAI_DR_RUNS_PER_MINUTE"
 ] as const;
 
 const ORIGINAL_ENV: Partial<Record<string, string | undefined>> = {};
@@ -114,6 +127,7 @@ function buildResponsePayload(id: string, status: string, outputText: string) {
 describe("openaiDeepResearch provider", () => {
   beforeEach(() => {
     applyEnv();
+    mockDistributedLimiter.acquireDistributedOpenAiSlot.mockClear();
   });
 
   afterEach(() => {
@@ -247,8 +261,83 @@ describe("openaiDeepResearch provider", () => {
     expect(receivedBody.model).toBe("o3-deep-research");
     expect(receivedBody.background).toBe(true);
     expect(receivedBody.tools).toEqual([{ type: "web_search_preview" }]);
+    expect(receivedBody.max_output_tokens).toBe(6000);
     expect(result.runId).toBe("resp_run");
     expect(result.status).toBe("in_progress");
+    expect(mockDistributedLimiter.acquireDistributedOpenAiSlot).toHaveBeenCalledWith(2, undefined);
+  });
+
+  it("uses the configured maximum output tokens when provided", async () => {
+    applyEnv({
+      OPENAI_DR_MAX_OUTPUT_TOKENS: "6000"
+    });
+    const env = getServerEnv();
+    const url = `${env.OPENAI_DR_BASE_URL}/responses`;
+    let receivedBody: any;
+
+    server.use(
+      http.post(url, async ({ request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          id: "resp_run",
+          status: "in_progress"
+        });
+      })
+    );
+
+    await executeRun({
+      sessionId: "session_custom_tokens",
+      prompt: "Research AI safety regulations."
+    });
+
+    expect(receivedBody.max_output_tokens).toBe(6000);
+    expect(mockDistributedLimiter.acquireDistributedOpenAiSlot).toHaveBeenCalledWith(2, undefined);
+  });
+
+  it("queues deep research runs when the per-minute limit is reached", async () => {
+    vi.useFakeTimers();
+    applyEnv({
+      OPENAI_DR_RUNS_PER_MINUTE: "1"
+    });
+
+    const waitSpy = vi.spyOn(retryUtils, "wait");
+    const env = getServerEnv();
+    const url = `${env.OPENAI_DR_BASE_URL}/responses`;
+    let callCount = 0;
+
+    server.use(
+      http.post(url, async () => {
+        callCount += 1;
+        return HttpResponse.json({
+          id: `resp_run_${callCount}`,
+          status: "in_progress"
+        });
+      })
+    );
+
+    const firstPromise = executeRun({
+      sessionId: "session_limit",
+      prompt: "First run"
+    });
+    const secondPromise = executeRun({
+      sessionId: "session_limit",
+      prompt: "Second run"
+    });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.runAllTimersAsync();
+    await firstPromise;
+    await secondPromise;
+
+    expect(callCount).toBe(2);
+    const waitedAtLeastMinute = waitSpy.mock.calls.some(
+      ([milliseconds]) => typeof milliseconds === "number" && milliseconds >= 60_000
+    );
+    expect(waitedAtLeastMinute).toBe(true);
+    expect(mockDistributedLimiter.acquireDistributedOpenAiSlot).toHaveBeenCalledTimes(2);
+
+    waitSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it("polls until completion and normalizes the response", async () => {
@@ -282,5 +371,91 @@ describe("openaiDeepResearch provider", () => {
     expect(response.status).toBe("completed");
     expect(response.result?.summary).toBe("Summary line");
     expect(response.result?.insights).toEqual(["Insight A", "Insight B"]);
+  });
+
+  it("continues polling beyond the default attempt count when runs stay in progress", async () => {
+    vi.useFakeTimers();
+
+    const env = getServerEnv();
+    const url = `${env.OPENAI_DR_BASE_URL}/responses/resp_long`;
+    let callCount = 0;
+
+    server.use(
+      http.get(url, () => {
+        callCount += 1;
+        if (callCount <= 11) {
+          return HttpResponse.json({
+            id: "resp_long",
+            status: "in_progress"
+          });
+        }
+
+        return HttpResponse.json(
+          buildResponsePayload(
+            "resp_long",
+            "completed",
+            "Summary\n\nFinal insight"
+          )
+        );
+      })
+    );
+
+    const promise = pollResult({
+      runId: "resp_long",
+      initialDelayMs: 5
+    });
+
+    await vi.runAllTimersAsync();
+    const response = await promise;
+
+    expect(callCount).toBe(12);
+    expect(response.status).toBe("completed");
+
+    vi.useRealTimers();
+  });
+
+  it("caps exponential backoff at the configured maximum delay", async () => {
+    const env = getServerEnv();
+    const url = `${env.OPENAI_DR_BASE_URL}/responses/resp_cap`;
+    let callCount = 0;
+
+    server.use(
+      http.get(url, () => {
+        callCount += 1;
+        if (callCount <= 3) {
+          return HttpResponse.json({
+            id: "resp_cap",
+            status: "in_progress"
+          });
+        }
+
+        return HttpResponse.json(
+          buildResponsePayload(
+            "resp_cap",
+            "completed",
+            "Summary"
+          )
+        );
+      })
+    );
+
+    const waitSpy = vi.spyOn(retryUtils, "wait");
+
+    const response = await pollResult({
+      runId: "resp_cap",
+      initialDelayMs: 10,
+      maxDelayMs: 500,
+      maxAttempts: 6
+    });
+
+    expect(response.status).toBe("completed");
+    expect(callCount).toBe(4);
+    expect(waitSpy).toHaveBeenCalledTimes(3);
+    waitSpy.mock.calls.forEach(([delay]) => {
+      expect(typeof delay).toBe("number");
+      expect(delay).toBeLessThanOrEqual(500);
+    });
+
+    waitSpy.mockRestore();
   });
 });

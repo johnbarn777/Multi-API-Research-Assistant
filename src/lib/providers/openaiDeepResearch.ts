@@ -8,6 +8,7 @@ import {
 import { logger } from "@/lib/utils/logger";
 import { NonRetryableError, retryWithBackoff, wait } from "@/lib/utils/retry";
 import type { ProviderResult } from "@/types/research";
+import { acquireDistributedOpenAiSlot } from "@/server/research/rateLimiter";
 
 interface FetchWithRetryOptions {
   operation: string;
@@ -35,6 +36,16 @@ const MAX_CLARIFICATION_QUESTIONS = 3;
 const DEFAULT_CLARIFIER_MODEL = "gpt-4.1-mini";
 const DEFAULT_PROMPT_WRITER_MODEL = "gpt-4.1-mini";
 const DEFAULT_DEEP_RESEARCH_MODEL = "o4-mini-deep-research";
+const DEFAULT_MAX_OUTPUT_TOKENS = 6000;
+const DEFAULT_MAX_PROMPT_CHARS = 20000;
+const DEFAULT_MAX_COMPLETION_TOKENS = 16000;
+const DEFAULT_RUNS_PER_MINUTE = 2;
+const ONE_MINUTE_MS = 60_000;
+const MIN_RATE_LIMIT_DELAY_MS = 250;
+const DEFAULT_INITIAL_POLL_DELAY_MS = 1_000;
+const DEFAULT_MAX_POLL_DELAY_MS = 60_000;
+
+const runWindow: number[] = [];
 
 type ClarifierSchema = {
   questions: Array<{
@@ -69,6 +80,22 @@ interface OpenAIResponsesPayload {
     reasoning_tokens?: number;
   };
   output?: ResponsesOutputItem[];
+  error?: {
+    message?: string;
+    code?: string;
+    [key: string]: unknown;
+  };
+  last_error?: {
+    message?: string;
+    code?: string;
+    param?: string;
+    [key: string]: unknown;
+  };
+  incomplete_details?: {
+    reason?: string;
+    message?: string;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -90,6 +117,26 @@ function createHeaders(env: ServerEnv): HeadersInit {
   return headers;
 }
 
+function parseRetryAfterMs(headers: Headers): number | null {
+  const header = headers.get("Retry-After");
+  if (!header) {
+    return null;
+  }
+
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    const diff = date - Date.now();
+    return diff > 0 ? diff : 0;
+  }
+
+  return null;
+}
+
 async function fetchWithRetry(
   input: string,
   init: RequestInit,
@@ -102,6 +149,7 @@ async function fetchWithRetry(
         if (!response.ok) {
           const errorBody = await safeJson(response);
           const retryable = response.status >= 500 || response.status === 429;
+          const retryAfterMs = response.status === 429 ? parseRetryAfterMs(response.headers) : null;
           const baseMessage = `${provider}.${operation} failed with status ${response.status}`;
           if (!retryable) {
             throw new NonRetryableError(`${baseMessage}: ${JSON.stringify(errorBody)}`, {
@@ -112,7 +160,8 @@ async function fetchWithRetry(
           const retryError = new Error(`${baseMessage}; retrying`);
           Object.assign(retryError, {
             status: response.status,
-            body: errorBody
+            body: errorBody,
+            ...(retryAfterMs !== null ? { retryAfterMs } : {})
           });
           throw retryError;
         }
@@ -132,6 +181,9 @@ async function fetchWithRetry(
             error: error instanceof Error ? error.message : String(error),
             ...(error && typeof error === "object" && "status" in error
               ? { status: (error as { status?: number }).status }
+              : {}),
+            ...(error && typeof error === "object" && "retryAfterMs" in error
+              ? { retryAfterMs: (error as { retryAfterMs?: number }).retryAfterMs }
               : {})
           });
         }
@@ -404,6 +456,68 @@ function extractSources(payload: OpenAIResponsesPayload): Array<{ title?: string
   return sources.length > 0 ? sources : undefined;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pickSerializableFields(source: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      result[key] = value;
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      const trimmed = value
+        .filter((entry) => ["string", "number", "boolean"].includes(typeof entry))
+        .slice(0, 5);
+      if (trimmed.length > 0) {
+        result[key] = trimmed;
+      }
+    }
+  }
+
+  return result;
+}
+
+function extractIncompleteDetails(payload: OpenAIResponsesPayload): Record<string, unknown> | undefined {
+  const details: Record<string, unknown> = {};
+
+  if (isRecord(payload.incomplete_details)) {
+    const sanitized = pickSerializableFields(payload.incomplete_details);
+    if (Object.keys(sanitized).length > 0) {
+      details.incomplete = sanitized;
+    }
+  }
+
+  if (isRecord(payload.last_error)) {
+    const sanitized = pickSerializableFields(payload.last_error);
+    if (Object.keys(sanitized).length > 0) {
+      details.lastError = sanitized;
+    }
+  }
+
+  if (isRecord(payload.error)) {
+    const sanitized = pickSerializableFields(payload.error);
+    if (Object.keys(sanitized).length > 0) {
+      details.error = sanitized;
+    }
+  }
+
+  const outputText = extractOutputText(payload);
+  if (outputText) {
+    details.outputText = outputText.slice(0, 500);
+  }
+
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
 export interface StartSessionOptions {
   topic: string;
   context?: string;
@@ -584,6 +698,87 @@ export async function submitAnswer({
 interface ExecuteRunOptions {
   sessionId: string;
   prompt: string;
+  requestId?: string;
+}
+
+function resolveMaxOutputTokens(env: ServerEnv): number {
+  const configured = env.OPENAI_DR_MAX_OUTPUT_TOKENS;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+function resolveMaxPromptChars(env: ServerEnv): number {
+  const configured = env.OPENAI_DR_MAX_PROMPT_CHARS;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return DEFAULT_MAX_PROMPT_CHARS;
+}
+
+function resolveMaxCompletionTokens(env: ServerEnv): number {
+  const configured = env.OPENAI_DR_MAX_COMPLETION_TOKENS;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return configured;
+  }
+  return DEFAULT_MAX_COMPLETION_TOKENS;
+}
+
+function resolveRunsPerMinute(env: ServerEnv): number {
+  const configured = env.OPENAI_DR_RUNS_PER_MINUTE;
+  if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+    return Math.max(1, Math.floor(configured));
+  }
+  const estimatedTokensPerRun = Math.max(
+    resolveMaxCompletionTokens(env),
+    resolveMaxOutputTokens(env)
+  );
+  const conservativeLimit = estimatedTokensPerRun > 0 ? Math.floor(200000 / estimatedTokensPerRun) : 1;
+  return Math.max(1, Math.min(DEFAULT_RUNS_PER_MINUTE, conservativeLimit));
+}
+
+async function acquireRunSlot(env: ServerEnv): Promise<number> {
+  const limit = resolveRunsPerMinute(env);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return 0;
+  }
+
+  while (true) {
+    const now = Date.now();
+    while (runWindow.length > 0 && now - runWindow[0] >= ONE_MINUTE_MS) {
+      runWindow.shift();
+    }
+
+    if (runWindow.length < limit) {
+      runWindow.push(now);
+      return limit;
+    }
+
+    const nextAvailable = runWindow[0] + ONE_MINUTE_MS;
+    const waitMs = Math.max(MIN_RATE_LIMIT_DELAY_MS, nextAvailable - now);
+
+    logger.info("openai.deepResearch.rate_limit.wait", {
+      provider: "openai-deep-research",
+      limitPerMinute: limit,
+      waitMs
+    });
+
+    await wait(waitMs);
+  }
+
+  // Unreachable, but satisfies TypeScript control flow analysis.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+  return limit as number;
+}
+
+function clampPrompt(prompt: string, maxChars: number): { prompt: string; truncated: boolean } {
+  if (prompt.length <= maxChars) {
+    return { prompt, truncated: false };
+  }
+
+  const truncatedPrompt = prompt.slice(0, Math.max(0, maxChars)).replace(/\s+$/u, "").concat("\n\n[Truncated due to length]");
+  return { prompt: truncatedPrompt, truncated: true };
 }
 
 export interface ExecuteRunResult {
@@ -592,27 +787,44 @@ export interface ExecuteRunResult {
   raw: unknown;
 }
 
-export async function executeRun({ sessionId, prompt }: ExecuteRunOptions): Promise<ExecuteRunResult> {
+export async function executeRun({ sessionId, prompt, requestId }: ExecuteRunOptions): Promise<ExecuteRunResult> {
   const env = getServerEnv();
   const model = env.OPENAI_DR_MODEL ?? DEFAULT_DEEP_RESEARCH_MODEL;
+
+  const perProcessLimit = await acquireRunSlot(env);
+  if (perProcessLimit > 0) {
+    await acquireDistributedOpenAiSlot(perProcessLimit, requestId);
+  }
+
+  const { prompt: constrainedPrompt, truncated } = clampPrompt(prompt, resolveMaxPromptChars(env));
+  if (truncated) {
+    logger.warn("openai.deepResearch.prompt_truncated", {
+      provider: "openai-deep-research",
+      sessionId,
+      requestId,
+      originalLength: prompt.length,
+      maxChars: resolveMaxPromptChars(env)
+    });
+  }
 
   logger.info("openai.deepResearch.executeRun", {
     provider: "openai-deep-research",
     sessionId,
-    promptLength: prompt.length,
+    promptLength: constrainedPrompt.length,
     model
   });
 
   const response = await createResponse({
     env,
     model,
-    input: prompt,
+    input: constrainedPrompt,
     tools: [
       {
         type: "web_search_preview"
       }
     ],
-    background: true
+    background: true,
+    maxOutputTokens: resolveMaxOutputTokens(env)
   });
 
   const runId = response.id;
@@ -633,6 +845,7 @@ interface PollResultOptions {
   runId: string;
   maxAttempts?: number;
   initialDelayMs?: number;
+  maxDelayMs?: number;
 }
 
 export interface PollResultResponse {
@@ -643,14 +856,24 @@ export interface PollResultResponse {
 
 export async function pollResult({
   runId,
-  maxAttempts = 10,
-  initialDelayMs = 1000
+  maxAttempts,
+  initialDelayMs = DEFAULT_INITIAL_POLL_DELAY_MS,
+  maxDelayMs
 }: PollResultOptions): Promise<PollResultResponse> {
   const env = getServerEnv();
-  let attempt = 0;
-  let delay = initialDelayMs;
+  const resolvedMaxAttempts =
+    maxAttempts ?? env.OPENAI_DR_POLL_MAX_ATTEMPTS ?? null;
+  const resolvedMaxDelay = Math.max(
+    MIN_RATE_LIMIT_DELAY_MS,
+    maxDelayMs ?? env.OPENAI_DR_POLL_MAX_DELAY_MS ?? DEFAULT_MAX_POLL_DELAY_MS
+  );
 
-  while (attempt < maxAttempts) {
+  let attempt = 0;
+  let delay = Math.max(MIN_RATE_LIMIT_DELAY_MS, initialDelayMs);
+  let lastStatus: string | null = null;
+  let lastStatusDetails: Record<string, unknown> | undefined;
+
+  while (resolvedMaxAttempts === null || attempt < resolvedMaxAttempts) {
     logger.info("openai.deepResearch.poll", {
       provider: "openai-deep-research",
       runId,
@@ -659,6 +882,17 @@ export async function pollResult({
 
     const response = await retrieveResponse(env, runId);
     const status = typeof response.status === "string" ? response.status : "unknown";
+    const statusDetails = status !== "completed" ? extractIncompleteDetails(response) : undefined;
+    lastStatus = status;
+    lastStatusDetails = statusDetails;
+
+    logger.info("openai.deepResearch.poll.status", {
+      provider: "openai-deep-research",
+      runId,
+      attempt: attempt + 1,
+      status,
+      ...(statusDetails ? { statusDetails } : {})
+    });
 
     if (status === "completed") {
       const outputText = extractOutputText(response);
@@ -678,15 +912,36 @@ export async function pollResult({
     }
 
     attempt += 1;
-    if (attempt >= maxAttempts) {
+    if (resolvedMaxAttempts !== null && attempt >= resolvedMaxAttempts) {
       break;
     }
 
     await wait(delay);
-    delay *= 2;
+    delay = Math.min(delay * 2, resolvedMaxDelay);
   }
 
-  throw new Error("Timed out waiting for OpenAI Deep Research result");
+  if (resolvedMaxAttempts !== null) {
+    throw new Error(
+      [
+        `Timed out waiting for OpenAI Deep Research result after ${resolvedMaxAttempts} attempts`,
+        lastStatus ? `last status: ${lastStatus}` : null,
+        lastStatusDetails ? `details: ${JSON.stringify(lastStatusDetails)}` : null
+      ]
+        .filter(Boolean)
+        .join("; ")
+    );
+  }
+
+  // The loop should continue indefinitely when no attempt limit is configured.
+  throw new Error(
+    [
+      "Timed out waiting for OpenAI Deep Research result",
+      lastStatus ? `last status: ${lastStatus}` : null,
+      lastStatusDetails ? `details: ${JSON.stringify(lastStatusDetails)}` : null
+    ]
+      .filter(Boolean)
+      .join("; ")
+  );
 }
 
 function outputErrorMessage(response: OpenAIResponsesPayload): string | undefined {

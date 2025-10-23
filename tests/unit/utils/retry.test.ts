@@ -67,4 +67,45 @@ describe("retryWithBackoff", () => {
 
     vi.useRealTimers();
   });
+
+  it("honors retryAfterMs metadata when scheduling retries", async () => {
+    vi.useFakeTimers();
+
+    const transientError = Object.assign(new Error("rate limited"), {
+      retryAfterMs: 1500
+    });
+
+    const attempts = [transientError, "success" as const];
+    const onRetry = vi.fn();
+    const operation = vi.fn(async ({ attempt }: RetryCallContext) => {
+      const result = attempts[attempt - 1];
+      if (result instanceof Error) {
+        throw result;
+      }
+      return result;
+    });
+
+    const promise = retryWithBackoff(operation, {
+      initialDelayMs: 100,
+      maxAttempts: 2,
+      onRetry
+    });
+
+    await vi.advanceTimersByTimeAsync(1500);
+    const result = await promise;
+
+    expect(result).toBe("success");
+    expect(operation).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenCalledWith(
+      transientError,
+      expect.objectContaining({
+        attempt: 1,
+        maxAttempts: 2,
+        delayMs: 1500
+      })
+    );
+
+    vi.useRealTimers();
+  });
 });

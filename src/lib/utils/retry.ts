@@ -93,10 +93,19 @@ export async function retryWithBackoff<T>(
         break;
       }
 
+      const retryAfterMs =
+        error && typeof error === "object" && "retryAfterMs" in error
+          ? Number((error as { retryAfterMs?: unknown }).retryAfterMs)
+          : undefined;
+      let delayForAttempt = delay;
+      if (Number.isFinite(retryAfterMs) && (retryAfterMs as number) > 0) {
+        delayForAttempt = Math.max(delayForAttempt, Math.ceil(retryAfterMs as number));
+      }
+
       const retryContext: RetryAttemptContext = {
         attempt: attemptNumber,
         maxAttempts,
-        delayMs: delay
+        delayMs: delayForAttempt
       };
 
       if (!shouldRetry(error, retryContext)) {
@@ -107,8 +116,9 @@ export async function retryWithBackoff<T>(
         await onRetry(error, retryContext);
       }
 
-      await wait(delay);
-      delay *= multiplier;
+      await wait(retryContext.delayMs);
+      const nextDelay = retryContext.delayMs * multiplier;
+      delay = Math.max(delay * multiplier, nextDelay);
     }
 
     attemptIndex += 1;
@@ -116,4 +126,3 @@ export async function retryWithBackoff<T>(
 
   throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "Retry failed"));
 }
-

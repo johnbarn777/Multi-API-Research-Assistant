@@ -3,6 +3,11 @@ import type { ResearchProviderState, ProviderRunStatus } from "@/types/research"
 type ProviderProgressProps = {
   provider: "openai" | "gemini";
   state?: ResearchProviderState;
+  onRetry?: () => void;
+  isRetrying?: boolean;
+  retryError?: string | null;
+  retrySuccess?: string | null;
+  disabled?: boolean;
 };
 
 type StatusToken = ProviderRunStatus | "queued" | "unknown";
@@ -112,7 +117,15 @@ function buildMeta(state?: ResearchProviderState): string | null {
   return parts.length > 0 ? parts.join(" • ") : null;
 }
 
-export function ProviderProgress({ provider, state }: ProviderProgressProps) {
+export function ProviderProgress({
+  provider,
+  state,
+  onRetry,
+  isRetrying = false,
+  retryError,
+  retrySuccess,
+  disabled = false
+}: ProviderProgressProps) {
   const providerName = provider === "openai" ? "OpenAI Deep Research" : "Google Gemini";
   const status = (state?.status ?? "unknown") as StatusToken;
   const statusLabel = statusLabels[status] ?? statusLabels.unknown;
@@ -120,6 +133,12 @@ export function ProviderProgress({ provider, state }: ProviderProgressProps) {
   const summary = formatSummary(provider, state);
   const meta = buildMeta(state);
   const lastUpdated = formatTimestamp(state?.completedAt ?? state?.startedAt);
+  const isProviderRunning = state?.status === "running";
+  const hasAttempted = Boolean(state) && state?.status !== "idle" && state?.status !== "queued";
+  const showRetryButton = typeof onRetry === "function" && hasAttempted && !isProviderRunning;
+  const helperMessage = retryError ?? retrySuccess ?? null;
+  const retryDisabled = disabled || isRetrying || isProviderRunning;
+  const helperClass = retryError ? "text-rose-300" : "text-emerald-300";
 
   return (
     <article className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/40 p-5">
@@ -132,6 +151,21 @@ export function ProviderProgress({ provider, state }: ProviderProgressProps) {
       <p className="text-sm text-slate-400 whitespace-pre-line">{summary}</p>
       {meta ? <p className="text-xs text-slate-500">{meta}</p> : null}
       {lastUpdated ? <p className="text-xs text-slate-500">Last update {lastUpdated}</p> : null}
+      {showRetryButton ? (
+        <div className="flex flex-col gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={retryDisabled}
+            className="inline-flex w-fit items-center rounded-md border border-slate-600 px-3 py-1 text-xs font-medium text-slate-100 transition hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isRetrying ? "Retrying…" : `Retry ${providerName}`}
+          </button>
+          {helperMessage ? (
+            <p className={`text-xs ${helperClass}`}>{helperMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   );
 }

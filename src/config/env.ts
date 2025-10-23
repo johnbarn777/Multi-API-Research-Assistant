@@ -17,6 +17,138 @@ const serverSchema = z.object({
   OPENAI_DR_MODEL: z.string().min(1).optional(),
   OPENAI_CLARIFIER_MODEL: z.string().min(1).optional(),
   OPENAI_PROMPT_WRITER_MODEL: z.string().min(1).optional(),
+  OPENAI_DR_MAX_OUTPUT_TOKENS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_MAX_OUTPUT_TOKENS must be a positive number"
+        });
+        return z.NEVER;
+      }
+      const normalized = Math.floor(parsed);
+      if (normalized > 128000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_MAX_OUTPUT_TOKENS must be less than or equal to 128000"
+        });
+        return z.NEVER;
+      }
+      if (normalized < 512) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_MAX_OUTPUT_TOKENS must be at least 512"
+        });
+        return z.NEVER;
+      }
+      return normalized;
+    }),
+  OPENAI_DR_MAX_PROMPT_CHARS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_MAX_PROMPT_CHARS must be a positive number"
+        });
+        return z.NEVER;
+      }
+      return Math.floor(parsed);
+    }),
+  OPENAI_DR_MAX_COMPLETION_TOKENS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_MAX_COMPLETION_TOKENS must be a positive number"
+        });
+        return z.NEVER;
+      }
+      return Math.floor(parsed);
+    }),
+  OPENAI_DR_POLL_MAX_ATTEMPTS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_POLL_MAX_ATTEMPTS must be a positive integer"
+        });
+        return z.NEVER;
+      }
+      return Math.floor(parsed);
+    }),
+  OPENAI_DR_POLL_MAX_DELAY_MS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed < 1000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_POLL_MAX_DELAY_MS must be at least 1000"
+        });
+        return z.NEVER;
+      }
+      return Math.floor(parsed);
+    }),
+  OPENAI_DR_RUNS_PER_MINUTE: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) {
+        return undefined;
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_RUNS_PER_MINUTE must be a positive number"
+        });
+        return z.NEVER;
+      }
+      const normalized = Math.floor(parsed);
+      if (normalized < 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_RUNS_PER_MINUTE must be at least 1"
+        });
+        return z.NEVER;
+      }
+      if (normalized > 60) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "OPENAI_DR_RUNS_PER_MINUTE must be less than or equal to 60"
+        });
+        return z.NEVER;
+      }
+      return normalized;
+    }),
   GEMINI_API_KEY: z.string().min(1),
   GEMINI_BASE_URL: z.string().url(),
   GEMINI_MODEL: z.string().min(1),
@@ -111,6 +243,12 @@ function parseServerEnv(): ServerEnv {
     OPENAI_DR_MODEL: process.env.OPENAI_DR_MODEL,
     OPENAI_CLARIFIER_MODEL: process.env.OPENAI_CLARIFIER_MODEL,
     OPENAI_PROMPT_WRITER_MODEL: process.env.OPENAI_PROMPT_WRITER_MODEL,
+    OPENAI_DR_MAX_OUTPUT_TOKENS: process.env.OPENAI_DR_MAX_OUTPUT_TOKENS,
+    OPENAI_DR_MAX_PROMPT_CHARS: process.env.OPENAI_DR_MAX_PROMPT_CHARS,
+    OPENAI_DR_MAX_COMPLETION_TOKENS: process.env.OPENAI_DR_MAX_COMPLETION_TOKENS,
+    OPENAI_DR_POLL_MAX_ATTEMPTS: process.env.OPENAI_DR_POLL_MAX_ATTEMPTS,
+    OPENAI_DR_POLL_MAX_DELAY_MS: process.env.OPENAI_DR_POLL_MAX_DELAY_MS,
+    OPENAI_DR_RUNS_PER_MINUTE: process.env.OPENAI_DR_RUNS_PER_MINUTE,
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
     GEMINI_BASE_URL: process.env.GEMINI_BASE_URL,
     GEMINI_MODEL: process.env.GEMINI_MODEL,

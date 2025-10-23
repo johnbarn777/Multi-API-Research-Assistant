@@ -5,8 +5,8 @@ export const RESEARCH_ALLOWED_TRANSITIONS: Record<ResearchStatus, ReadonlySet<Re
   refining: new Set(["ready_to_run", "failed"]),
   ready_to_run: new Set(["running", "failed"]),
   running: new Set(["completed", "failed"]),
-  completed: new Set(),
-  failed: new Set()
+  completed: new Set(["running"]),
+  failed: new Set(["running"])
 };
 
 export function canTransition(current: ResearchStatus, next: ResearchStatus) {

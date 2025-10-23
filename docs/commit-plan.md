@@ -172,6 +172,7 @@ This plan sequences atomic commits to deliver the Multi-API Deep Research Assist
 - ~~Integration: Supertest simulating provider 5xx responses to confirm retries logged and eventual success/failure matches spec.~~ (`tests/integration/provider-retry.test.ts`)
 - E2E: Not required (covered by previous flows).
 > Follow-up (2025-10-18): Sanitized provider payloads before persisting to Firestore so nested `undefined` values (e.g., `raw.output.sources`) no longer trigger document write failures during research runs.
+> Update (2025-10-19): Introduced `OPENAI_DR_MAX_OUTPUT_TOKENS` and `OPENAI_DR_RUNS_PER_MINUTE` safeguards to stay under the 200k TPM cap, exposed the `/api/research/:id/providers/:provider/retry` flow with per-provider retry controls on the research detail page, removed the hard OpenAI polling timeout (now configurable via `OPENAI_DR_POLL_MAX_ATTEMPTS` / `OPENAI_DR_POLL_MAX_DELAY_MS`), and added a Firestore-backed distributed rate limiter so horizontal scaling can’t burst past the TPM ceiling.
 
 ## Commit 12: Accessibility, responsiveness, and CI coverage
 

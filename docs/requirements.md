@@ -238,7 +238,11 @@ Query: `?cursor=<ts|docId>`
 
 **Resp:** `{ item: Research, alreadyRunning?: boolean }` → transitions research to `running` and triggers OpenAI + Gemini execution in background (`Promise.allSettled`). Firestore updates each provider’s `status`, `startedAt`, `completedAt`, `durationMs`, `result`, and `error` as runs settle (supports partial success).
 
-### 7.6 `POST /api/research/:id/finalize`
+### 7.6 `POST /api/research/:id/providers/:provider/retry`
+
+**Resp:** `{ item: Research, alreadyRunning?: boolean }` → targets a single provider (`openai` or `gemini`). Marks the specified provider as `running`, preserves the counterpart provider’s state, and leaves the research status at `running` until both providers settle again. Hit is gated by the in-process Deep Research rate limiter; repeated calls while the provider is already running return `alreadyRunning: true`.
+
+### 7.7 `POST /api/research/:id/finalize`
 
 (Internal) Generates the comparative PDF report once provider runs settle. Responds with `application/pdf` body (`Content-Disposition: attachment`) and headers:
 
@@ -265,7 +269,7 @@ Side effects:
   * `RefinementQA` (question, textarea, back/next)
   * `ProviderProgress` (OpenAI/Gemini status: idle/queued/running/success/failure; summaries, tokens, timestamps)
   * `Toasts` for errors
-  * Retry affordances: `Start Refinement` exposes a retry button after failures, the research detail page offers a `Retry run` control when provider execution fails, and the final report card exposes `Retry email delivery` when the previous attempt errored or is stuck in `queued`.
+  * Retry affordances: `Start Refinement` exposes a retry button after failures, the research detail page offers both a global `Retry run` control and per-provider `Retry OpenAI` / `Retry Google Gemini` buttons once an attempt has completed, and the final report card exposes `Retry email delivery` when the previous attempt errored or is stuck in `queued`.
 * **Responsive:** Mobile-first; single-column; min tap targets 44px; dashboard verified at 375px width with no horizontal scroll.
 * **Empty States:** Helpful copy; guide to create first research.
 * **Accessibility:** Labels for inputs, semantic headings, focus ring, skip link to main content, and axe-core audits on dashboard/detail flows.
@@ -326,6 +330,12 @@ OPENAI_PROJECT_ID= # optional; required for project-scoped keys (e.g., Deep Rese
 OPENAI_DR_MODEL=o4-mini-deep-research # optional override for primary Deep Research model
 OPENAI_CLARIFIER_MODEL=gpt-4.1-mini # optional override for clarification question model
 OPENAI_PROMPT_WRITER_MODEL=gpt-4.1-mini # optional override for prompt rewriting model
+OPENAI_DR_MAX_OUTPUT_TOKENS=6000 # optional: cap per-run outputs to stay within TPM limits
+OPENAI_DR_MAX_PROMPT_CHARS=20000 # optional: truncate refined prompts beyond this length
+OPENAI_DR_MAX_COMPLETION_TOKENS=16000 # optional: expected completion budget per run
+OPENAI_DR_POLL_MAX_ATTEMPTS= # optional: override polling attempts; omit for unlimited
+OPENAI_DR_POLL_MAX_DELAY_MS=60000 # optional: cap delay growth between poll attempts
+OPENAI_DR_RUNS_PER_MINUTE=2 # optional: throttle Deep Research run starts per process-minute
 
 # Google Gemini
 GEMINI_API_KEY=
@@ -649,6 +659,9 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 ## 14) Implementation Notes (MVP)
 
 * **OpenAI DR** endpoints vary; implement via `OPENAI_API_KEY` and a session abstraction (`src/lib/providers/openaiDeepResearch.ts`) covering `startSession()`, `submitAnswer()`, `executeRun()`, `pollResult()` with retry/backoff.
+  * Requests honour provider `Retry-After` headers, clamp each run with `OPENAI_DR_MAX_OUTPUT_TOKENS` (default 6 k tokens), and gate new executions behind the token-bucket limiter (`OPENAI_DR_RUNS_PER_MINUTE`, default 2) to stay below the 200 k TPM ceiling.
+  * A Firestore-backed distributed rate limiter (`rate_limits/openai_deep_research`) keeps concurrency aligned across server instances, and refined prompts are truncated past `OPENAI_DR_MAX_PROMPT_CHARS` with a warning to avoid oversize inputs.
+  * Polling now runs until the Deep Research job resolves; `OPENAI_DR_POLL_MAX_ATTEMPTS` (optional) can enforce an upper bound, and `OPENAI_DR_POLL_MAX_DELAY_MS` limits exponential backoff growth.
 * **OpenAI DR project keys**: when `OPENAI_PROJECT_ID` is provided, requests include the `OpenAI-Project` header so project-scoped keys work seamlessly with the Responses API. `OPENAI_DR_MODEL`, `OPENAI_CLARIFIER_MODEL`, and `OPENAI_PROMPT_WRITER_MODEL` can override the default model choices if the project has custom access tiers.
 * **Reasoning summaries**: generating reasoning summaries requires a verified organization. The integration leaves `reasoning.summary` unset so requests succeed even when verification is pending. Enable it only after the org is verified.
 * **Gemini**: `generateContent` (`src/lib/providers/gemini.ts`) accepts the refined prompt, retries transient failures, and polls pending operations when necessary.
@@ -656,7 +669,7 @@ _Status (2025-10-16): `/api/research/:id/openai/answer` now persists answers, ap
 * **PDF**: Use `pdf-lib` for text + lists; avoid heavy fonts; render in Node runtime.
 * **Email**: Build RFC822, attach PDF (base64); send to `user.email`.
 * **Demo mode**: Flip `DEMO_MODE=true` to drive the entire flow with fixture data—refinement questions, provider summaries, email delivery (console preview), and PDF storage bypass—while still exercising the UI and persistence paths. Finalize responses expose `X-Email-Preview-Base64` so demos can surface the mocked email copy.
-* **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`).
+* **State Machine**: enforce allowed transitions (`awaiting_refinements → refining → ready_to_run → running → completed|failed`) and permit `completed|failed → running` when a provider retry is triggered.
 * **Dev Auth Bypass**: Local developers blocked on Firebase sign-in can export `DEV_AUTH_BYPASS=true` (with optional UID/email overrides) to have the middleware inject a stub user during `pnpm dev`; keep unset in production.
 
 ---
